@@ -1,0 +1,6 @@
+requests
+telethon
+asyncio
+dotenv
+logging
+aiogram
