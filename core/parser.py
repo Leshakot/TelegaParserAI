@@ -108,7 +108,7 @@ async def parse_channel(client: TelegramClient, channel_name: str, limit: int = 
     except Exception as e:
         logging.error(f"🔥 Критическая ошибка при парсинге канала '{channel_name}': {e}", exc_info=True)
         return 0
-    
+    пше 
 
 async def parse_all_active_channels(limit_per_channel: int = 10) -> int:
     """
