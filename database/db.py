@@ -1,10 +1,10 @@
 ﻿import sqlite3
-import csv
 import asyncio
 from datetime import datetime
 from contextlib import contextmanager
 from typing import List
 import os
+import re
 
 DATABASE = "data.db"
 
@@ -13,7 +13,6 @@ def init_db_sync():
     """Синхронная инициализация структуры БД"""
     with sqlite3.connect(DATABASE) as conn:
         cur = conn.cursor()
-
         # Таблица постов
         cur.execute("""
             CREATE TABLE IF NOT EXISTS posts (
@@ -29,7 +28,6 @@ def init_db_sync():
                 UNIQUE(channel_link, post_link)
             )
         """)
-
         # Таблица каналов
         cur.execute("""
             CREATE TABLE IF NOT EXISTS channels (
@@ -40,7 +38,6 @@ def init_db_sync():
                 source TEXT
             )
         """)
-
         cur.execute("""
             CREATE TABLE IF NOT EXISTS blacklist (
                 id INTEGER PRIMARY KEY,
@@ -49,7 +46,6 @@ def init_db_sync():
                 added_date DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
-
         # Таблица истории каналов
         cur.execute("""
             CREATE TABLE IF NOT EXISTS channel_history (
@@ -60,7 +56,6 @@ def init_db_sync():
                 error_message TEXT
             )
         """)
-
         # Таблица состояния парсинга
         cur.execute("""
             CREATE TABLE IF NOT EXISTS parsing_state (
@@ -69,7 +64,6 @@ def init_db_sync():
                 last_parsed TIMESTAMP
             )
         """)
-
         conn.commit()
 
 
@@ -77,6 +71,31 @@ async def init_db():
     """Асинхронная инициализация БД"""
     await asyncio.to_thread(init_db_sync)
 
+
+async def get_unchecked_posts_count():
+    """Получает количество непроверенных постов"""
+    with get_cursor() as cur:
+        return cur.execute("SELECT COUNT(*) FROM posts WHERE is_processed = 0").fetchone()[0]
+
+async def initialize_blacklist():
+    """Добавляет стандартные шаблоны в черный список при старте."""
+    default_patterns = [
+        ("admin", "Служебный псевдоним"),
+        ("support", "Служебный псевдоним"),
+        ("bot", "Служебный псевдоним"),
+        ("telegram", "Официальный канал"),
+        ("^[a-z]{1,3}$", "Слишком короткое имя канала"),  # Используется как регулярное выражение
+    ]
+    
+    with get_cursor() as cur:
+        for pattern, reason in default_patterns:
+            try:
+                cur.execute(
+                    "INSERT OR IGNORE INTO blacklist (pattern, reason) VALUES (?, ?)",
+                    (pattern, reason)
+                )
+            except sqlite3.Error as e:
+                print(f"Ошибка при добавлении шаблона '{pattern}': {e}")
 
 async def ensure_db_initialized():
     """Гарантирует инициализацию БД"""
@@ -94,10 +113,8 @@ async def ensure_db_initialized():
                 'channels',
                 'parsing_state',
                 'channel_history',
-                'blacklist',
-                #'channel'
+                'blacklist'
             }
-
             if not required_tables.issubset(existing_tables):
                 print("🛠 Обновляем структуру базы данных...")
                 await init_db()
@@ -124,6 +141,7 @@ async def ensure_db_exists():
     if not os.path.exists(DATABASE):
         print("🛠 Создаем новую БД...")
         await init_db()
+
 
 async def save_post(check_date, post_date, channel_link, post_link, post_text, user_requested=0):
     """Сохранение поста в базу данных с проверкой на дубликаты"""
@@ -157,225 +175,30 @@ async def add_channel(channel_link, source="parser"):
             return False
 
 
-async def get_channels_to_monitor(active_only=True):
-    """Получение списка каналов для мониторинга"""
-    with get_cursor() as cur:
-        query = "SELECT channel_link FROM channels"
-        if active_only:
-            query += " WHERE is_active = 1"
-        return [row[0] for row in cur.execute(query).fetchall()]
-
-
-async def update_channel_status(channel_link, is_active):
-    """Обновление статуса канала (активен/неактивен)"""
-    with get_cursor() as cur:
-        cur.execute('''
-            UPDATE channels SET is_active = ? WHERE channel_link = ?
-        ''', (is_active, channel_link))
-        return cur.rowcount > 0
-
-
-async def save_new_channel(channel_data, source="parser"):
+async def is_blacklisted(value: str, check_pattern: bool = False) -> bool:
     """
-    Сохранение нового канала в базу данных
-    :param channel_data: Может быть:
-        - str: ссылка на канал (например, "https://t.me/channel" или "@channel")
-        - list/iterable: список ссылок на каналы
-        - str: текст поста, из которого нужно извлечь каналы
-    :param source: источник канала ("parser", "user", "auto_find" и т.д.)
-    :return: кортеж (total_processed, saved_count, duplicates_count)
+    Проверяет, находится ли значение в черном списке.
+
+    :param value: Значение для проверки (канал или имя пользователя)
+    :param check_pattern: Если True, ищет совпадение по шаблонам
+    :return: True, если найдено в чёрном списке
     """
-
-    def normalize_channel_link(link):
-        """Приводит ссылку к стандартному формату https://t.me/channel"""
-        link = link.strip()
-        if link.startswith("@"):
-            return f"https://t.me/{link[1:]}"
-        if not link.startswith(("http://", "https://")):
-            return f"https://t.me/{link}"
-        return link.split('?')[0]  # Убираем параметры запроса
-
-    processed = 0
-    saved = 0
-    duplicates = 0
-
     with get_cursor() as cur:
-        # Если передана строка с текстом поста (ищем ссылки)
-        if isinstance(channel_data, str) and ("t.me/" in channel_data or "@" in channel_data):
-            import re
-            channel_links = re.findall(r'(?:@|t\.me/)([a-zA-Z0-9_]{5,32})', channel_data)
-            channel_data = [f"https://t.me/{link}" for link in set(channel_links)]
-
-        # Если передана одиночная ссылка
-        elif isinstance(channel_data, str):
-            channel_data = [channel_data]
-
-        for raw_link in channel_data:
-            try:
-                link = normalize_channel_link(raw_link)
-                processed += 1
-
-                cur.execute('''
-                    INSERT INTO channels (channel_link, added_date, source)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(channel_link) DO UPDATE SET 
-                        is_active=EXCLUDED.is_active,
-                        source=EXCLUDED.source
-                ''', (link, datetime.now(), source))
-
-                if cur.rowcount > 0:
-                    saved += 1
-                else:
-                    duplicates += 1
-
-            except (ValueError, sqlite3.Error) as e:
-                print(f"Ошибка при обработке канала {raw_link}: {e}")
-                continue
-
-    return (processed, saved, duplicates)
-
-
-async def get_unchecked_posts_count():
-    with get_cursor() as cur:
-        return cur.execute("SELECT COUNT(*) FROM posts WHERE is_processed = 0").fetchone()[0]
-
-
-async def get_unchecked_posts(limit=None):
-    """Получение списка непроверенных постов из базы данных"""
-    with get_cursor() as cur:
-        query = "SELECT id, post_text FROM posts WHERE is_processed = 0"
-        if limit:
-            query += f" LIMIT {limit}"
-        return cur.execute(query).fetchall()
-
-
-async def mark_post_as_checked(post_id, is_recipe):
-    """Пометка поста как проверенного с указанием, является ли он рецептом"""
-    with get_cursor() as cur:
-        try:
-            cur.execute('''
-                UPDATE posts 
-                SET is_processed = 1, 
-                    is_recipe = ? 
-                WHERE id = ?
-            ''', (1 if is_recipe else 0, post_id))
-            return cur.rowcount > 0
-        except sqlite3.Error as e:
-            print(f"Ошибка при обновлении поста: {e}")
+        if check_pattern:
+            # Ищем совпадение регулярных выражений
+            cur.execute("SELECT pattern FROM blacklist")
+            patterns = [row[0] for row in cur.fetchall()]
+            for pattern in patterns:
+                try:
+                    if re.search(pattern, value):
+                        return True
+                except re.error:
+                    continue
             return False
-
-
-async def export_data_to_csv():
-    filename = f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-    with get_cursor() as cur, open(filename, 'w', newline='', encoding='utf-8-sig') as file:
-        # Создаем writer с указанием разделителя ";"
-        writer = csv.writer(file, delimiter=';', quoting=csv.QUOTE_MINIMAL)
-        writer.writerow(['ID', 'Channel', 'Post ID', 'Text', 'Date', 'Is Recipe'])
-
-        for row in cur.execute("SELECT * FROM posts"):
-            # Обрабатываем каждое поле для корректного сохранения
-            cleaned_row = []
-            for item in row:
-                if isinstance(item, str):
-                    # Удаляем существующие точки с запятой в тексте, чтобы не нарушать формат
-                    cleaned_item = item.replace(';', ' ').strip()
-                    cleaned_row.append(cleaned_item)
-                else:
-                    cleaned_row.append(item)
-            writer.writerow(cleaned_row)
-
-    return filename
-
-
-async def get_stats():
-    await ensure_db_initialized()  # Добавьте эту строку
-    with get_cursor() as cur:
-        return {
-            'total_posts': cur.execute("SELECT COUNT(*) FROM posts").fetchone()[0],
-            'recipes': cur.execute("SELECT COUNT(*) FROM posts WHERE is_recipe = 1").fetchone()[0],
-            'unchecked': cur.execute("SELECT COUNT(*) FROM posts WHERE is_processed = 0").fetchone()[0]
-        }
-
-async def get_active_channels():
-    """Получение списка активных каналов для мониторинга"""
-    with get_cursor() as cur:
-        return [row[0] for row in cur.execute(
-            "SELECT channel_link FROM channels WHERE is_active = 1"
-        ).fetchall()]
-
-async def channel_exists(channel_link: str) -> bool:
-    """Проверка существования канала в базе"""
-    with get_cursor() as cur:
-        return cur.execute(
-            "SELECT 1 FROM channels WHERE channel_link = ?",
-            (channel_link,)
-        ).fetchone() is not None
-
-async def is_post_parsed(channel_link: str, post_id: int) -> bool:
-    with get_cursor() as cur:
-        return cur.execute(
-            "SELECT 1 FROM posts WHERE channel_link = ? AND post_link LIKE ?",
-            (channel_link, f"%/{post_id}")
-        ).fetchone() is not None
-
-
-async def get_last_post_id(channel_link: str) -> int:
-    """
-    Получает ID последнего обработанного поста для канала.
-    Возвращает None если канал новый или нет постов.
-    """
-    try:
-        with get_cursor() as cur:
-            # Проверяем существование столбца post_id
-            cur.execute("PRAGMA table_info(posts)")
-            columns = [row[1] for row in cur.fetchall()]
-
-            if 'post_id' not in columns:
-                # Если столбца нет, используем id как post_id
-                result = cur.execute(
-                    "SELECT id FROM posts "
-                    "WHERE channel_link = ? "
-                    "ORDER BY id DESC LIMIT 1",
-                    (channel_link,)
-                ).fetchone()
-            else:
-                # Стандартный запрос если столбец существует
-                result = cur.execute(
-                    "SELECT post_id FROM posts "
-                    "WHERE channel_link = ? "
-                    "ORDER BY post_id DESC LIMIT 1",
-                    (channel_link,)
-                ).fetchone()
-
-            return result[0] if result else None
-
-    except sqlite3.Error as e:
-        print(f"Ошибка при получении последнего post_id: {e}")
-        return None
-
-async def save_new_channels(channels: List[str], source: str = "auto_find") -> int:
-    """
-    Сохраняет новые каналы в базу данных
-    :param channels: Список каналов (формат @username)
-    :param source: Источник обнаружения
-    :return: Количество сохраненных каналов
-    """
-    saved_count = 0
-    with get_cursor() as cur:
-        for channel in channels:
-            try:
-                # Преобразуем @username в https://t.me/username
-                link = f"https://t.me/{channel[1:]}"
-                cur.execute(
-                    "INSERT OR IGNORE INTO channels (channel_link, added_date, source) "
-                    "VALUES (?, datetime('now'), ?)",
-                    (link, source)
-                )
-                if cur.rowcount > 0:
-                    saved_count += 1
-            except sqlite3.Error as e:
-                print(f"Ошибка сохранения канала {channel}: {e}")
-    return saved_count
+        else:
+            # Простая проверка на наличие точного совпадения
+            cur.execute("SELECT 1 FROM blacklist WHERE pattern = ?", (value,))
+            return cur.fetchone() is not None
 
 
 async def add_to_blacklist(pattern: str, reason: str = "") -> bool:
@@ -384,7 +207,7 @@ async def add_to_blacklist(pattern: str, reason: str = "") -> bool:
         try:
             cur.execute(
                 "INSERT OR IGNORE INTO blacklist (pattern, reason) VALUES (?, ?)",
-                (pattern.lower(), reason)
+                (pattern, reason)
             )
             return cur.rowcount > 0
         except sqlite3.Error as e:
@@ -392,19 +215,12 @@ async def add_to_blacklist(pattern: str, reason: str = "") -> bool:
             return False
 
 
-async def is_blacklisted(channel_link: str) -> bool:
-    """Проверяет, находится ли канал в черном списке"""
+async def get_active_channels():
+    """Получение списка активных каналов для мониторинга"""
     with get_cursor() as cur:
-        try:
-            # Проверяем точные совпадения и шаблоны
-            result = cur.execute(
-                "SELECT 1 FROM blacklist WHERE ? LIKE '%' || pattern || '%'",
-                (channel_link.lower(),)
-            ).fetchone()
-            return result is not None
-        except sqlite3.Error as e:
-            print(f"Ошибка проверки черного списка: {e}")
-            return False
+        return [row[0] for row in cur.execute(
+            "SELECT channel_link FROM channels WHERE is_active = 1"
+        ).fetchall()]
 
 
 async def deactivate_channel(channel_link: str, error_message: str = ""):
@@ -416,7 +232,6 @@ async def deactivate_channel(channel_link: str, error_message: str = ""):
                 "UPDATE channels SET is_active = 0 WHERE channel_link = ?",
                 (channel_link,)
             )
-
             # Добавляем запись в историю
             cur.execute(
                 """INSERT INTO channel_history 
@@ -424,9 +239,15 @@ async def deactivate_channel(channel_link: str, error_message: str = ""):
                 VALUES (?, 'inactive', ?)""",
                 (channel_link, error_message[:500])  # Ограничиваем длину сообщения
             )
-
-            # Автоматически добавляем в черный список при определенных ошибках
-            if "username is unacceptable" in error_message:
-                await add_to_blacklist(channel_link.split('/')[-1], "Недопустимое имя пользователя")
         except sqlite3.Error as e:
             print(f"Ошибка деактивации канала: {e}")
+
+
+async def get_stats():
+    await ensure_db_initialized()
+    with get_cursor() as cur:
+        return {
+            'total_posts': cur.execute("SELECT COUNT(*) FROM posts").fetchone()[0],
+            'recipes': cur.execute("SELECT COUNT(*) FROM posts WHERE is_recipe = 1").fetchone()[0],
+            'unchecked': cur.execute("SELECT COUNT(*) FROM posts WHERE is_processed = 0").fetchone()[0]
+        }
