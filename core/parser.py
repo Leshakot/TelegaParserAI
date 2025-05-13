@@ -14,7 +14,7 @@ from database.db import (
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
-    filename='parser.log',
+    filename='parser.txt',
     filemode='w',
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
@@ -83,6 +83,7 @@ async def parse_channel(client: TelegramClient, channel_name: str, limit: int = 
 
     try:
         async for message in client.iter_messages(entity, limit=limit):
+            # print(message.text)
             if not message.text and not message.media:
                 logger.debug(f"📎 Пропущено сообщение без текста/медиа: {message.id}")
                 continue

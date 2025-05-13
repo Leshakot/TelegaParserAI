@@ -119,6 +119,36 @@ async def ensure_db_initialized():
                 print("🛠 Обновляем структуру базы данных...")
                 await init_db()
 
+async def export_data_to_csv():
+    """
+    Экспортирует все данные из таблицы posts в CSV-файл.
+    Возвращает путь к созданному файлу.
+    """
+    import csv
+    filename = f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    
+    with get_cursor() as cur, open(filename, mode='w', newline='', encoding='utf-8-sig') as file:
+        writer = csv.writer(file, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+        
+        # Заголовки
+        cur.execute("PRAGMA table_info(posts)")
+        headers = [info[1] for info in cur.fetchall()]
+        writer.writerow(headers)
+
+        # Данные
+        cur.execute("SELECT * FROM posts")
+        for row in cur.fetchall():
+            cleaned_row = []
+            for item in row:
+                if isinstance(item, str):
+                    # Очищаем строковые значения
+                    cleaned_item = item.replace(';', ',').strip()  # Избегаем разрыва данных
+                    cleaned_row.append(cleaned_item)
+                else:
+                    cleaned_row.append(item)
+            writer.writerow(cleaned_row)
+    
+    return filename
 
 @contextmanager
 def get_cursor():
@@ -214,6 +244,42 @@ async def add_to_blacklist(pattern: str, reason: str = "") -> bool:
             print(f"Ошибка добавления в черный список: {e}")
             return False
 
+async def save_new_channels(channels: List[str], source: str = "auto_find") -> int:
+    saved_count = 0
+    with get_cursor() as cur:
+        for channel in channels:
+            try:
+                link = f"https://t.me/ {channel[1:]}"  # @username → https://t.me/username 
+                cur.execute(
+                    "INSERT OR IGNORE INTO channels (channel_link, added_date, source) VALUES (?, ?, ?)",
+                    (link, datetime.now(), source)
+                )
+                if cur.rowcount > 0:
+                    saved_count += 1
+            except sqlite3.Error as e:
+                print(f"Ошибка сохранения канала {channel}: {e}")
+    return saved_count
+
+async def mark_post_as_checked(post_id, is_recipe):
+    with get_cursor() as cur:
+        try:
+            cur.execute('''
+                UPDATE posts 
+                SET is_processed = 1, 
+                    is_recipe = ? 
+                WHERE id = ?
+            ''', (1 if is_recipe else 0, post_id))
+            return cur.rowcount > 0
+        except sqlite3.Error as e:
+            print(f"Ошибка при обновлении поста: {e}")
+            return False
+
+async def get_unchecked_posts(limit=None):
+    with get_cursor() as cur:
+        query = "SELECT id, post_text FROM posts WHERE is_processed = 0"
+        if limit:
+            query += f" LIMIT {limit}"
+        return cur.execute(query).fetchall()
 
 async def get_active_channels():
     """Получение списка активных каналов для мониторинга"""

@@ -1,13 +1,12 @@
 ﻿import asyncio
 import logging
 from aiogram import Bot, Dispatcher
-from telethon import TelegramClient
 
 # Твои модули
 from database.db import ensure_db_initialized, initialize_blacklist
 from core.bot_controller import setup_bot_handlers
 from core.parser import start_scheduled_parsing
-from config import TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_BOT_TOKEN
+from config import TELEGRAM_BOT_TOKEN, TELEGRAM_API_ID, TELEGRAM_API_HASH
 
 # Настройка логирования
 logging.basicConfig(
@@ -15,9 +14,6 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-
-# Глобальный клиент Telethon
-from core.clients import telegram_client
 
 
 async def main():
@@ -31,32 +27,42 @@ async def main():
     await initialize_blacklist()
     logger.info("🚫 Чёрный список загружен")
 
-    # 3. Авторизуемся как пользователь Telegram
-    await telegram_client.start()
+    # 3. Создаём клиента Telegram
+    from core.clients import telegram_client  # <-- должен быть создан заранее
+
+    # 4. Подключаемся к Telegram
+    logger.info("📞 Подключение к Telegram...")
+    try:
+        await telegram_client.connect()
+    except Exception as e:
+        logger.critical(f"🔴 Не удалось подключиться к Telegram: {e}")
+        return
+
+    # 5. Проверяем авторизацию
     if not await telegram_client.is_user_authorized():
         logger.warning("⚠️ Требуется авторизация через телефон и код")
         phone = input("📞 Введите номер телефона: ")
         await telegram_client.send_code_request(phone)
         code = input("✉️ Введите код из Telegram: ")
+
         try:
             await telegram_client.sign_in(phone, code)
+            logger.info("✅ Авторизован в Telegram")
         except Exception as e:
             logger.error(f"❌ Ошибка авторизации: {e}")
             return
 
-    logger.info("✅ Успешно авторизован в Telegram")
-
-    # 4. Инициализируем бота
+    # 6. Инициализируем бота
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     dp = Dispatcher()
 
-    # 5. Регистрируем обработчики
+    # 7. Регистрируем обработчики
     setup_bot_handlers(dp)
 
-    # 6. Запуск фоновой задачи парсинга
+    # 8. Запуск фоновой задачи парсинга
     asyncio.create_task(start_scheduled_parsing(client=telegram_client))
 
-    # 7. Запуск бота
+    # 9. Запуск бота
     logger.info("🟢 Бот запущен и готов к работе")
     try:
         await dp.start_polling(bot)

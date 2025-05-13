@@ -103,12 +103,8 @@ async def process_channel_link(message: Message, state: FSMContext):
 
 @router.message(F.text == "👀 Парсинг постов")
 async def parse_posts_handler(message: Message):
-    """
-    Запускает парсинг всех активных каналов через Telethon-клиент.
-    """
     await message.answer("🔍 Подключаюсь к Telegram для парсинга...")
 
-    # Проверяем подключение клиента
     if not telegram_client.is_connected():
         try:
             await telegram_client.connect()

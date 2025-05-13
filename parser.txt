@@ -1,0 +1,26 @@
+2025-05-13 14:52:57,937 - INFO - \U0001f680 Запуск бота и инициализация систем...
+2025-05-13 14:52:57,940 - INFO - \U0001f6e0 База данных инициализирована
+2025-05-13 14:52:57,943 - INFO - \U0001f6ab Чёрный список загружен
+2025-05-13 14:52:57,943 - INFO - \U0001f4de Подключение к Telegram...
+2025-05-13 14:52:57,943 - INFO - Connecting to 149.154.167.51:443/TcpFull...
+2025-05-13 14:52:57,949 - INFO - Connection to 149.154.167.51:443/TcpFull complete!
+2025-05-13 14:52:58,685 - INFO - \U0001f7e2 Бот запущен и готов к работе
+2025-05-13 14:52:58,685 - INFO - Start polling
+2025-05-13 14:52:58,685 - INFO - 
+2025-05-13T14:52:58.685385 \U0001f50d Начало планового парсинга
+2025-05-13 14:52:58,690 - INFO - \U0001f50d Начинаем парсинг канала: @fa_electronics
+2025-05-13 14:52:58,922 - ERROR - \U0001f525 Критическая ошибка при парсинге канала '@fa_electronics': object sqlite3.Cursor can't be used in 'await' expression
+Traceback (most recent call last):
+  File "C:\Users\aveoc\OneDrive\Документы\tg_bot\TelegaParserAI\core\parser.py", line 109, in parse_channel
+    await cur.execute(
+    ...<4 lines>...
+    )
+TypeError: object sqlite3.Cursor can't be used in 'await' expression
+2025-05-13 14:52:58,980 - INFO - Run polling for bot @LinkProces_Bot id=7846381675 - 'LinkProcesBot'
+2025-05-13 14:52:59,940 - INFO - \u2705 Цикл завершен. Сохранено постов: 0
+2025-05-13 14:52:59,940 - INFO - \u23f3 Следующий парсинг через 60 минут
+2025-05-13 14:59:27,134 - INFO - Polling stopped
+2025-05-13 14:59:27,401 - INFO - Disconnecting from 149.154.167.51:443/TcpFull...
+2025-05-13 14:59:27,401 - INFO - Disconnection from 149.154.167.51:443/TcpFull complete!
+2025-05-13 14:59:27,409 - INFO - \U0001f6d1 Бот и клиент Telegram остановлены
+2025-05-13 14:59:27,410 - INFO - Polling stopped for bot @LinkProces_Bot id=7846381675 - 'LinkProcesBot'
