@@ -106,6 +106,8 @@ async def process_channel_link(message: Message, state: FSMContext):
 @router.message(F.text == "👀 Парсинг постов")
 async def parse_posts_handler(message: Message):
     # Вариант 1: Парсинг последнего добавленного канала
+    # await parse_all_active_channels(10)
+    # limit = int(message.text.split()[1])
     await parse_all_active_channels(message)
 
     # Вариант 2: Парсинг всех каналов (раскомментировать если нужно)
@@ -210,6 +212,7 @@ async def stop_checking(message: Message, state: FSMContext):
 @router.message(F.text == "📤 Выгрузить данные")
 async def export_data(message: Message):
     count = await get_unchecked_posts_count()
+    print(count)
     if count > 0:
         file_path = await export_data_to_csv()
         with open(file_path, 'rb') as file:

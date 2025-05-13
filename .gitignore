@@ -3,4 +3,7 @@
 venv/
 __pycache__
 data.db
-session_parser.session
+session_name.session
+
+log.py
+test.py

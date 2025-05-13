@@ -143,6 +143,7 @@ async def save_post(check_date, post_date, channel_link, post_link, post_text, u
 
 async def add_channel(channel_link, source="parser"):
     """Добавление нового канала в базу для мониторинга"""
+    channel_link = channel_link.split('/')[-1]
     with get_cursor() as cur:
         try:
             cur.execute('''

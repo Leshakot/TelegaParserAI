@@ -1,18 +1,28 @@
 ﻿import asyncio
+import logging
 from datetime import datetime
 from telethon import TelegramClient
-from database.db import save_post, get_active_channels, get_last_post_id, add_to_blacklist, is_blacklisted, deactivate_channel, get_cursor
+from database.db import save_post, get_active_channels, get_last_post_id, add_to_blacklist, is_blacklisted, \
+    deactivate_channel, get_cursor
 from config import TELEGRAM_API_ID, TELEGRAM_API_HASH, CHANNELS_TO_PARSE
 
+logging.basicConfig(level=logging.INFO, filename='log.py', filemode='w')
+
+"""
+todo: сделать обработку ошибок
+todo: написать логирование
+todo: написать кнопку вывода
+"""
 
 # Автодобавление распространенных невалидных шаблонов
 DEFAULT_BLACKLIST_PATTERNS = [
     ("admin", "Служебный псевдоним"),
     ("support", "Служебный псевдоним"),
-    ("bot", "Служебный псевдоним"),
+    # ("bot", "Служебный псевдоним"),
     ("telegram", "Официальные каналы"),
     ("[a-z]{1,3}", "Слишком короткие имена")
 ]
+
 
 async def initialize_blacklist():
     """Заполняет черный список базовыми шаблонами"""
@@ -20,62 +30,101 @@ async def initialize_blacklist():
         await add_to_blacklist(pattern, reason)
 
 
-async def parse_channel(channel_name: str, limit: int = 100) -> int:
+async def parse_channel(channel_name: str, limit: int = 10) -> int:
     """Парсинг канала с обработкой ошибок и автоматической деактивацией"""
-    channel_link = f"https://t.me/{channel_name}"
-
+    channel_link = f"{channel_name}"
+    result = {"success": False, "saved_count": 0, "errors": []}
+    print(channel_link)
     # Проверка черного списка
-    if await is_blacklisted(channel_link):
-        print(f"⏭ Канал {channel_link} в черном списке, пропускаем")
-        return 0
+    # if await is_blacklisted(channel_link):
+    #     print(f"⏭ Канал {channel_link} в черном списке, пропускаем")
+    #     return 0
 
     try:
         async with TelegramClient('session_name', TELEGRAM_API_ID, TELEGRAM_API_HASH) as client:
+            await client.start()
             try:
+                print(channel_link)
                 entity = await client.get_entity(channel_name)
+                # print("entity:", entity)
             except (ValueError, TypeError) as e:
                 error_msg = str(e)
-                print(f"❌ Ошибка доступа к каналу {channel_link}: {error_msg}")
+                result['errors'].append(error_msg)
+                logging.warning(f"❌ Ошибка доступа к каналу {channel_link}: {error_msg}")
                 await deactivate_channel(channel_link, error_msg)
                 return 0
-
+            except Exception as e:
+                logging.exception(f"Ошибка следующая {e}")
+                result['errors'].append(str(e))
             base_link = f"https://t.me/{entity.username}" if hasattr(entity, 'username') else channel_link
             saved_count = 0
-
             async for message in client.iter_messages(entity, limit=limit):
-                if not message.text:
-                    continue
-
-                saved = await save_post(
-                    check_date=datetime.now(),
-                    post_date=message.date,
-                    channel_link=base_link,
-                    post_link=f"{base_link}/{message.id}",
-                    post_text=message.text,
-                    user_requested=0
-                )
-                if saved:
-                    saved_count += 1
+                # if not message.text:
+                #     continue
+                # print(message.channel)
+                try:
+                    saved = await save_post(
+                        check_date=datetime.now(),
+                        post_date=message.date,
+                        channel_link=base_link,
+                        post_link=f"{base_link}/{message.id}",
+                        post_text=message.text,
+                        user_requested=0
+                    )
+                    print(saved)
+                    if saved:
+                        saved_count += 1
+                except Exception as e:
+                    logging.error(f"Ошибка сохранения поста {message.id}: {e}")
+                    result['errors'].append(str(e))
 
             # Обновляем время последней проверки
             with get_cursor() as cur:
-                cur.execute(
-                    """INSERT OR REPLACE INTO channel_history 
-                    (channel_link, status, last_checked) 
-                    VALUES (?, 'active', datetime('now'))""",
+                await cur.execute(
+                    """INSERT OR REPLACE INTO channel_history
+                     (channel_link, status, last_checked)
+                     VALUES (?, 'active', datetime('now'))""",
                     (channel_link,)
                 )
-
-            return saved_count
+                cur.commit()
+            await client.disconnect()
+        return saved_count
 
     except Exception as e:
         error_msg = str(e)
-        print(f"❌ Критическая ошибка парсинга {channel_link}: {error_msg}")
+        logging.exception(f"❌ Критическая ошибка парсинга {channel_link}: {error_msg}")
         await deactivate_channel(channel_link, error_msg)
         return 0
 
+# async def parse_channel(channel_name: str, limit: int = 100):
+#     """
+#     Парсинг канала с обработкой новых и существующих каналов
+#     """
+#     channel_link = f"https://t.me/{channel_name}"
+#     last_post_id = await get_last_post_id(channel_link)
+#
+#     async with TelegramClient('session_name', TELEGRAM_API_ID, TELEGRAM_API_HASH) as client:
+#         try:
+#             entity = await client.get_entity(channel_name)
+#             # Определяем направление парсинга
+#             async for message in client.iter_messages(entity, limit=limit):
+#                 if not message.text:
+#                     continue
+#
+#                 await save_post(
+#                     check_date=datetime.now(),
+#                     post_date=message.date,
+#                     channel_link=channel_link,
+#                     post_link=f"{channel_link}/{message.id}",
+#                     post_text=message.text,
+#                     user_requested=0
+#                 )
+#
+#         except Exception as e:
+#             print(f"❌ Ошибка парсинга {channel_name}: {e}")
+#
 
-async def parse_all_active_channels(limit_per_channel: int = 50) -> int:
+async def parse_all_active_channels(limit_per_channel: int = 10) -> int:
     """
     Парсинг всех активных каналов с гарантированным возвратом int
     :return: Общее количество сохраненных постов
@@ -99,6 +148,8 @@ async def parse_all_active_channels(limit_per_channel: int = 50) -> int:
     print(f"✅ Всего сохранено постов: {total_saved}")
     return total_saved
 
+
+# todo: написать функцию для удаления канала из тбота
 
 async def start_scheduled_parsing(interval: int = 3600, limit: int = 50):
     """Фоновая задача парсинга с улучшенным логированием"""
