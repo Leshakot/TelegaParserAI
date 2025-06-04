@@ -10,8 +10,7 @@ from config import TELEGRAM_BOT_TOKEN, TELEGRAM_API_ID, TELEGRAM_API_HASH
 
 # Настройка логирования
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -60,12 +59,13 @@ async def main():
     setup_bot_handlers(dp)
 
     # 8. Запуск фоновой задачи парсинга
-    asyncio.create_task(start_scheduled_parsing(client=telegram_client))
+    # asyncio.create_task(start_scheduled_parsing(client=telegram_client))
 
     # 9. Запуск бота
     logger.info("🟢 Бот запущен и готов к работе")
     try:
         await dp.start_polling(bot)
+        logger.info("🟢 Бот запущен и готов к работе")
     finally:
         await bot.session.close()
         await telegram_client.disconnect()
