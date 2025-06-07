@@ -23,8 +23,8 @@ class Post(Base):
         onupdate=datetime.now,
     )
     post_date: Mapped[datetime] = mapped_column(DateTime, nullable=True)
-    channel_link: Mapped[str] = mapped_column(String, unique=True)
-    post_link: Mapped[str] = mapped_column(String, unique=True)
+    channel_link: Mapped[str] = mapped_column(String)
+    post_link: Mapped[str] = mapped_column(String)
     post_text: Mapped[str | None] = mapped_column(String)
     user_requested: Mapped[int | None] = mapped_column(Integer, default=0)
     is_recipe: Mapped[bool] = mapped_column(default=False)

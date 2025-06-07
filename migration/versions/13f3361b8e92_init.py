@@ -1,8 +1,8 @@
 """init
 
-Revision ID: 86953d20e230
+Revision ID: 13f3361b8e92
 Revises: 
-Create Date: 2025-06-07 15:40:13.297899
+Create Date: 2025-06-07 17:21:05.093925
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '86953d20e230'
+revision: str = '13f3361b8e92'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -56,9 +56,7 @@ def upgrade() -> None:
     sa.Column('is_recipe', sa.Boolean(), nullable=False),
     sa.Column('is_processed', sa.Boolean(), nullable=False),
     sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('channel_link'),
-    sa.UniqueConstraint('post_link')
+    sa.PrimaryKeyConstraint('id')
     )
     # ### end Alembic commands ###
 

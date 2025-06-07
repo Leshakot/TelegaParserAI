@@ -61,7 +61,7 @@ async def parse_channel(
     :param limit: Максимальное количество постов для парсинга
     :return: Количество успешно сохранённых постов
     """
-    channel_link = f"https://t.me/ {channel_name}"
+    channel_link = f"https://t.me/{channel_name.strip()}"
     logger.info(f"🔍 Начинаем парсинг канала: {channel_name}")
     print("in parse channel")
     # Проверяем, находится ли канал или имя пользователя в черном списке
@@ -89,7 +89,7 @@ async def parse_channel(
         else channel_link
     )
     saved_count = 0
-
+    print("NEXT STEP")
     try:
         async for message in client.iter_messages(entity, limit=limit):
             # print(message.text)
@@ -206,6 +206,7 @@ async def start_scheduled_parsing(
             total_saved = 0
             for channel in valid_channels:
                 channel_name = channel.split("/")[-1]
+                print(channel_name)
                 saved = await parse_channel(client, channel_name, limit_per_channel)
                 total_saved += saved
                 await asyncio.sleep(1)  # Задержка между каналами

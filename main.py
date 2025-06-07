@@ -60,7 +60,7 @@ async def main():
     setup_bot_handlers(dp)
 
     # 8. Запуск фоновой задачи парсинга
-    asyncio.create_task(start_scheduled_parsing(client=telegram_client))
+    # asyncio.create_task(start_scheduled_parsing(client=telegram_client))
 
     # 9. Запуск бота
     logger.info("🟢 Бот запущен и готов к работе")

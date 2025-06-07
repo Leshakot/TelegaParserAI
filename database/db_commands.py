@@ -104,10 +104,21 @@ async def save_post(
                 post_text=post_text,
                 user_requested=user_requested,
             )
-            session.add(post)
-            await session.commit()
-            await session.refresh(post)
-            return True
+
+            result = await session.execute(
+                select(
+                    exists().where(
+                        and_(Post.post_text == post_text, Post.post_link == post_link)
+                    )
+                )
+            )
+            post_db = result.scalar()
+            if not post_db:
+                session.add(post)
+                await session.commit()
+                await session.refresh(post)
+                return True
+            return False
         except SQLAlchemyError as e:
             logger.error(LOG_DB["db_err"].format(error=e))
             return False
