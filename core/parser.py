@@ -62,7 +62,7 @@ async def parse_channel(
     :return: Количество успешно сохранённых постов
     """
     channel_link = f"https://t.me/{channel_name.strip()}"
-    logger.info(f"🔍 Начинаем парсинг канала: {channel_name}")
+    logger.info(f"🔍 Начинаем парсинг канала: {channel_link}")
     print("in parse channel")
     # Проверяем, находится ли канал или имя пользователя в черном списке
     if await is_blacklisted(channel_name):
@@ -89,7 +89,7 @@ async def parse_channel(
         else channel_link
     )
     saved_count = 0
-    print("NEXT STEP")
+
     try:
         async for message in client.iter_messages(entity, limit=limit):
             # print(message.text)
