@@ -2,20 +2,20 @@
 import logging
 from datetime import datetime
 from telethon import TelegramClient
-from database.db import (
+from database.db_commands import (
     save_post,
     get_active_channels,
     add_to_blacklist,
     is_blacklisted,
     deactivate_channel,
-    get_cursor,
+    insert_repl_chan_history,
 )
 
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
-    filename="parser.txt",
-    filemode="w",
+    # filename="parser.txt",
+    # filemode="w",
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
@@ -100,7 +100,7 @@ async def parse_channel(
 
             post_link = f"{base_link}/{message.id}"
             try:
-                saved = save_post(
+                saved = await save_post(
                     check_date=datetime.now(),
                     post_date=message.date,
                     channel_link=base_link,
@@ -116,15 +116,7 @@ async def parse_channel(
                     f"❌ Ошибка сохранения поста {message.id}: {e}", exc_info=True
                 )
 
-        # Обновляем историю проверок
-        with get_cursor() as cur:
-            await cur.execute(
-                """INSERT OR REPLACE INTO channel_history 
-                   (channel_link, status, last_checked) 
-                   VALUES (?, 'active', datetime('now'))""",
-                (channel_link,),
-            )
-            cur.connection.commit()
+        await insert_repl_chan_history(channel_link)
         logger.info(
             f"📥 Канал '{channel_name}' обработан. Сохранено постов: {saved_count}"
         )

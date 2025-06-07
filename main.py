@@ -1,9 +1,10 @@
 ﻿import asyncio
 import logging
 from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage
 
 # Твои модули
-from database.db import ensure_db_initialized, initialize_blacklist
+from database.db_commands import initialize_blacklist
 from core.bot_controller import setup_bot_handlers
 from core.parser import start_scheduled_parsing
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_API_ID, TELEGRAM_API_HASH
@@ -19,8 +20,8 @@ async def main():
     logger.info("🚀 Запуск бота и инициализация систем...")
 
     # 1. Проверяем и создаём БД
-    await ensure_db_initialized()
-    logger.info("🛠 База данных инициализирована")
+    # await ensure_db_initialized()
+    # logger.info("🛠 База данных инициализирована")
 
     # 2. Инициализируем чёрный список
     await initialize_blacklist()
@@ -53,23 +54,28 @@ async def main():
 
     # 6. Инициализируем бота
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
-    dp = Dispatcher()
+    dp = Dispatcher(storage=MemoryStorage())
 
     # 7. Регистрируем обработчики
     setup_bot_handlers(dp)
 
     # 8. Запуск фоновой задачи парсинга
-    # asyncio.create_task(start_scheduled_parsing(client=telegram_client))
+    asyncio.create_task(start_scheduled_parsing(client=telegram_client))
 
     # 9. Запуск бота
     logger.info("🟢 Бот запущен и готов к работе")
+    # try:
+    #     await dp.start_polling(bot)
+    #     logger.info("🟢 Бот запущен и готов к работе")
+    # finally:
+    #     await bot.session.close()
+    #     await telegram_client.disconnect()
+    #     logger.info("🛑 Бот и клиент Telegram остановлены")
     try:
+        await bot.delete_webhook(drop_pending_updates=True)
         await dp.start_polling(bot)
-        logger.info("🟢 Бот запущен и готов к работе")
     finally:
-        await bot.session.close()
         await telegram_client.disconnect()
-        logger.info("🛑 Бот и клиент Telegram остановлены")
 
 
 if __name__ == "__main__":

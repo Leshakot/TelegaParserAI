@@ -14,7 +14,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-from database.db import (
+from database.db_commands import (
     get_unchecked_posts_count,
     export_data_to_csv,
     get_stats,
@@ -22,7 +22,9 @@ from database.db import (
     mark_post_as_checked,
     add_channel,
     save_new_channels,
-    get_cursor,
+    get_posts_for_search,
+    get_channel_links,
+    get_blacklist_pat_reason,
 )
 
 from core.clients import telegram_client  # <-- ваш клиент Telethon
@@ -64,7 +66,7 @@ async def add_channel_command(message: Message, state: FSMContext):
 async def process_channel_link(message: Message, state: FSMContext):
     try:
         channel_link = message.text.strip()
-        success = add_channel(channel_link, source="user")  # while db is sync
+        success = await add_channel(channel_link, source="user")
         if success:
             await message.answer(
                 f"✅ Канал {channel_link} добавлен для мониторинга!",
@@ -124,7 +126,7 @@ async def parse_with_limit(message: Message):
 
 @router.message(F.text == "🔄 Проверить посты на м. схемы")
 async def check_new_posts(message: Message, state: FSMContext):
-    count = get_unchecked_posts_count()  # while db sync
+    count = await get_unchecked_posts_count()  # while db sync
     if count == 0:
         await message.answer("🤷 Нет новых постов для проверки")
         return
@@ -144,14 +146,14 @@ async def process_unchecked_posts(message: Message, total_count: int):
     batch_size = 1
     try:
         while not STOP_CHECKING_FLAG:
-            posts = get_unchecked_posts(limit=batch_size)  # while db is sync
+            posts = await get_unchecked_posts(limit=batch_size)  # while db is sync
             if not posts:
                 break
             for post_id, post_text in posts:
                 if STOP_CHECKING_FLAG:
                     break
                 is_recipe = await check_post(post_text)
-                mark_post_as_checked(post_id, is_recipe)  # while db is sync
+                await mark_post_as_checked(post_id, is_recipe)  # while db is sync
                 checked_count += 1
                 await message.answer(
                     f"🔍 Проверено {checked_count}/{total_count} постов...",
@@ -187,7 +189,7 @@ async def stop_checking(message: Message, state: FSMContext):
 
 @router.message(F.text == "📤 Выгрузить данные")
 async def export_data(message: Message):
-    count = get_unchecked_posts_count()  # while db sync
+    count = await get_unchecked_posts_count()  # while db sync
     print(count)
     if count > 0:
         file_path = await export_data_to_csv()
@@ -205,7 +207,7 @@ async def handle_find_channels(message: Message):
         if not new_channels:
             await message.answer("🤷 Новых каналов не найдено")
             return
-        saved = save_new_channels(new_channels)  # while db is sync
+        saved = await save_new_channels(new_channels)  # while db is sync
         await message.answer(
             f"✅ Найдено {len(new_channels)} новых каналов\n"
             f"📥 Сохранено: {saved} каналов\n"
@@ -217,7 +219,7 @@ async def handle_find_channels(message: Message):
 
 @router.message(F.text == "📊 Статистика")
 async def show_stats(message: Message):
-    stats = get_stats()  # while db is sync
+    stats = await get_stats()  # while db is sync
     text = (
         f"📊 Статистика:\n"
         f"• Всего постов: {stats['total_posts']}\n"
@@ -230,19 +232,16 @@ async def show_stats(message: Message):
 async def search_new_channels() -> List[str]:
     CHANNEL_REGEX = r"(?:https?://)?(?:t\.me/|@)([a-zA-Z0-9_]{5,32})"
     found_channels = set()
-    with get_cursor() as cur:
-        cur.execute("SELECT post_text FROM posts WHERE is_processed = 0")
-        posts = cur.fetchall()
-        for (post_text,) in posts:
-            if not post_text:
-                continue
-            matches = re.findall(CHANNEL_REGEX, post_text)
-            for channel in matches:
-                normalized = f"@{channel.lower()}"
-                found_channels.add(normalized)
-    with get_cursor() as cur:
-        cur.execute("SELECT channel_link FROM channels")
-        existing_channels = {row[0].lower() for row in cur.fetchall()}
+
+    posts = await get_posts_for_search()
+    for (post_text,) in posts:
+        if not post_text:
+            continue
+        matches = re.findall(CHANNEL_REGEX, post_text)
+        for channel in matches:
+            normalized = f"@{channel.lower()}"
+            found_channels.add(normalized)
+    existing_channels = await get_channel_links()
     return [
         channel
         for channel in found_channels
@@ -267,10 +266,7 @@ async def manage_blacklist(message: Message, state: FSMContext):
 
 @router.message(F.text == "📜 Показать черный список")
 async def show_blacklist(message: Message):
-    with get_cursor() as cur:
-        items = cur.execute(
-            "SELECT pattern, reason FROM blacklist ORDER BY added_date DESC LIMIT 50"
-        ).fetchall()
+    items = await get_blacklist_pat_reason()
     if not items:
         await message.answer("Черный список пуст")
         return

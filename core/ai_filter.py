@@ -5,18 +5,15 @@ import uuid
 import time
 import ssl
 from pathlib import Path
-from database.db import get_unchecked_posts, mark_post_as_checked
+from database.db_commands import get_unchecked_posts, mark_post_as_checked
 from config import GIGACHAT_API_KEY
 
 
 # Кэш токена
-token_cache = {
-    "access_token": None,
-    "expires_at": 0
-}
+token_cache = {"access_token": None, "expires_at": 0}
 
 # Путь к SSL-сертификату
-cert_path = str(Path('russian_trusted_root_ca.cer').absolute())
+cert_path = str(Path("russian_trusted_root_ca.cer").absolute())
 
 
 def generate_rquid():
@@ -34,26 +31,28 @@ async def get_gigachat_token():
 
     url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
     headers = {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'application/json',
-        'RqUID': uuid.uuid4(),
-        'Authorization': f'Basic {GIGACHAT_API_KEY}'
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json",
+        "RqUID": uuid.uuid4(),
+        "Authorization": f"Basic {GIGACHAT_API_KEY}",
     }
 
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                    url,
-                    headers=headers,
-                    data={'scope': 'GIGACHAT_API_PERS'},
-                    ssl=ssl_context  # Передаем SSL контекст
+                url,
+                headers=headers,
+                data={"scope": "GIGACHAT_API_PERS"},
+                ssl=ssl_context,  # Передаем SSL контекст
             ) as response:
                 if response.status == 200:
                     token_data = await response.json()
-                    token_cache.update({
-                        "access_token": token_data["access_token"],
-                        "expires_at": time.time() + 1800
-                    })
+                    token_cache.update(
+                        {
+                            "access_token": token_data["access_token"],
+                            "expires_at": time.time() + 1800,
+                        }
+                    )
                     return token_cache["access_token"]
                 print(f"Ошибка HTTP: {response.status}")
     except Exception as e:
@@ -70,27 +69,30 @@ async def analyze_post_with_gigachat(post_text: str) -> str:
     # Создаем SSL контекст для основного запроса
     ssl_context = ssl.create_default_context(cafile=cert_path)
 
-    url = 'https://gigachat.devices.sberbank.ru/api/v1/chat/completions'
+    url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
     payload = {
         "model": "GigaChat",
         "messages": [
-            {"role": "system", "content": "Определи мошенничество в тексте. Ответ: Да/Нет"},
-            {"role": "user", "content": post_text[:4000]}
+            {
+                "role": "system",
+                "content": "Определи мошенничество в тексте. Ответ: Да/Нет",
+            },
+            {"role": "user", "content": post_text[:4000]},
         ],
-        "temperature": 0.1
+        "temperature": 0.1,
     }
 
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                    url,
-                    json=payload,
-                    headers={
-                        'Authorization': f'Bearer {token}',
-                        'Content-Type': 'application/json'
-                    },
-                    ssl=ssl_context,
-                    timeout=aiohttp.ClientTimeout(total=30)
+                url,
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                ssl=ssl_context,
+                timeout=aiohttp.ClientTimeout(total=30),
             ) as response:
                 if response.status == 200:
                     data = await response.json()

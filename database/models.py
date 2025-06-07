@@ -17,12 +17,12 @@ class Base(DeclarativeBase, AsyncAttrs):
 
 
 class Post(Base):
-    check_date: datetime = mapped_column(
+    check_date: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.now,
         onupdate=datetime.now,
     )
-    post_date: datetime = mapped_column(DateTime, nullable=True)
+    post_date: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     channel_link: Mapped[str] = mapped_column(String, unique=True)
     post_link: Mapped[str] = mapped_column(String, unique=True)
     post_text: Mapped[str | None] = mapped_column(String)
@@ -42,7 +42,7 @@ class Channel(Base):
 
 class Blacklist(Base):
     pattern: Mapped[str] = mapped_column(String, unique=True)
-    reason: Mapped[str] = mapped_column(String)
+    reason: Mapped[str] = mapped_column(String, nullable=True)
     added_date: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, onupdate=datetime.now
     )
@@ -50,8 +50,8 @@ class Blacklist(Base):
 
 class ChannelHistory(Base):
     channel_link: Mapped[str] = mapped_column(String)
-    status: Mapped[str] = mapped_column(String)
+    status: Mapped[str | None] = mapped_column(String, nullable=True)
     last_checked: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, onupdate=datetime.nowd
+        DateTime, default=datetime.now, onupdate=datetime.now
     )
-    error_message: Mapped[str] = mapped_column(String)
+    error_message: Mapped[str] = mapped_column(String, nullable=True)
