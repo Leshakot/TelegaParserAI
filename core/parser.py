@@ -62,11 +62,12 @@ async def parse_channel(
     :param limit: Максимальное количество постов для парсинга
     :return: Количество успешно сохранённых постов
     """
+    print("check user session")
     if not await ensure_telegram_client_connected():
-        print("check user session")
+
         return 0
     else:
-
+        print("client work")
         channel_link = f"https://t.me/{channel_name.strip()}"
         logger.info(f"🔍 Начинаем парсинг канала: {channel_link}")
         print("in parse channel")

@@ -2,7 +2,9 @@ from telethon import TelegramClient
 from config import TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_PHONE
 
 # Глобальная переменная для клиента
-telegram_client = TelegramClient("user_session", TELEGRAM_API_ID, TELEGRAM_API_HASH)
+telegram_client = TelegramClient(
+    "user_session", TELEGRAM_API_ID, TELEGRAM_API_HASH, auto_reconnect=True
+)
 
 
 async def init_telegram_client(bot_message=None):
@@ -38,6 +40,9 @@ async def init_telegram_client(bot_message=None):
 
 async def ensure_telegram_client_connected():
     print("ensure_telegram_client_connected")
+    if not telegram_client.is_connected():
+        print("try to connect")
+        await telegram_client.connect()
     if not await telegram_client.is_user_authorized():
         print("try to start client")
         await telegram_client.start()

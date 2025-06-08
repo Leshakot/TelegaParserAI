@@ -123,17 +123,17 @@ async def process_channel_action(callback_query: CallbackQuery, state: FSMContex
 async def parse_posts_handler(message: Message):
     await message.answer("🔍 Подключаюсь к Telegram для парсинга...")
 
-    if not telegram_client.is_connected():
-        try:
-            await telegram_client.connect()
-            if not await telegram_client.is_user_authorized():
-                await message.answer("❌ Telethon клиент не авторизован.")
-                logger.error("❌ Telethon клиент не авторизован.")
-                return
-        except Exception as e:
-            logger.critical(f"🔴 Ошибка подключения Telethon клиента: {e}")
-            await message.answer("⚠️ Не удалось подключиться к Telegram API.")
-            return
+    # if not telegram_client.is_connected():
+    #     try:
+    #         await telegram_client.connect()
+    #         if not await telegram_client.is_user_authorized():
+    #             await message.answer("❌ Telethon клиент не авторизован.")
+    #             logger.error("❌ Telethon клиент не авторизован.")
+    #             return
+    #     except Exception as e:
+    #         logger.critical(f"🔴 Ошибка подключения Telethon клиента: {e}")
+    #         await message.answer("⚠️ Не удалось подключиться к Telegram API.")
+    #         return
 
     try:
         print("Begin save posts")
