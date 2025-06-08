@@ -2,6 +2,7 @@
 import logging
 from datetime import datetime
 from telethon import TelegramClient
+from core.clients import ensure_telegram_client_connected
 from database.db_commands import (
     save_post,
     get_active_channels,
@@ -61,73 +62,80 @@ async def parse_channel(
     :param limit: Максимальное количество постов для парсинга
     :return: Количество успешно сохранённых постов
     """
-    channel_link = f"https://t.me/{channel_name.strip()}"
-    logger.info(f"🔍 Начинаем парсинг канала: {channel_link}")
-    print("in parse channel")
-    # Проверяем, находится ли канал или имя пользователя в черном списке
-    if await is_blacklisted(channel_name):
-        logger.warning(f"⏭ Канал '{channel_name}' в черном списке. Пропускаем.")
+    if not await ensure_telegram_client_connected():
+        print("check user session")
         return 0
+    else:
 
-    try:
-        print(f"try get parse channel {channel_name}")
-        entity = await client.get_entity(channel_name)
-    except (ValueError, TypeError) as e:
-        error_msg = f"❌ Не удалось получить сущность канала '{channel_name}': {e}"
-        logger.warning(error_msg)
-        await deactivate_channel(channel_link, str(e))
-        return 0
-    except Exception as e:
-        logger.exception(
-            f"⚠️ Неожиданная ошибка при получении сущности '{channel_name}': {e}"
+        channel_link = f"https://t.me/{channel_name.strip()}"
+        logger.info(f"🔍 Начинаем парсинг канала: {channel_link}")
+        print("in parse channel")
+        # Проверяем, находится ли канал или имя пользователя в черном списке
+        if await is_blacklisted(channel_name):
+            logger.warning(f"⏭ Канал '{channel_name}' в черном списке. Пропускаем.")
+            return 0
+
+        try:
+            print(f"try get parse channel {channel_name}")
+            entity = await client.get_entity(channel_name)
+        except (ValueError, TypeError) as e:
+            error_msg = f"❌ Не удалось получить сущность канала '{channel_name}': {e}"
+            logger.warning(error_msg)
+            await deactivate_channel(channel_link, str(e))
+            return 0
+        except Exception as e:
+            logger.exception(
+                f"⚠️ Неожиданная ошибка при получении сущности '{channel_name}': {e}"
+            )
+            return 0
+
+        base_link = (
+            f"https://t.me/ {entity.username}"
+            if hasattr(entity, "username")
+            else channel_link
         )
-        return 0
+        saved_count = 0
 
-    base_link = (
-        f"https://t.me/ {entity.username}"
-        if hasattr(entity, "username")
-        else channel_link
-    )
-    saved_count = 0
+        try:
+            async for message in client.iter_messages(entity, limit=limit):
+                # print(message.text)
+                print("iter for message")
+                if not message.text and not message.media:
+                    logger.debug(
+                        f"📎 Пропущено сообщение без текста/медиа: {message.id}"
+                    )
+                    continue
 
-    try:
-        async for message in client.iter_messages(entity, limit=limit):
-            # print(message.text)
-            print("iter for message")
-            if not message.text and not message.media:
-                logger.debug(f"📎 Пропущено сообщение без текста/медиа: {message.id}")
-                continue
+                post_link = f"{base_link}/{message.id}"
+                try:
+                    saved = await save_post(
+                        check_date=datetime.now(),
+                        post_date=message.date,
+                        channel_link=base_link,
+                        post_link=post_link,
+                        post_text=message.text,
+                        user_requested=0,
+                    )
+                    if saved:
+                        saved_count += 1
+                        logger.debug(f"✅ Сохранен пост {message.id}")
+                except Exception as e:
+                    logger.error(
+                        f"❌ Ошибка сохранения поста {message.id}: {e}", exc_info=True
+                    )
 
-            post_link = f"{base_link}/{message.id}"
-            try:
-                saved = await save_post(
-                    check_date=datetime.now(),
-                    post_date=message.date,
-                    channel_link=base_link,
-                    post_link=post_link,
-                    post_text=message.text,
-                    user_requested=0,
-                )
-                if saved:
-                    saved_count += 1
-                    logger.debug(f"✅ Сохранен пост {message.id}")
-            except Exception as e:
-                logger.error(
-                    f"❌ Ошибка сохранения поста {message.id}: {e}", exc_info=True
-                )
+            await insert_repl_chan_history(channel_link)
+            logger.info(
+                f"📥 Канал '{channel_name}' обработан. Сохранено постов: {saved_count}"
+            )
+            return saved_count
 
-        await insert_repl_chan_history(channel_link)
-        logger.info(
-            f"📥 Канал '{channel_name}' обработан. Сохранено постов: {saved_count}"
-        )
-        return saved_count
-
-    except Exception as e:
-        logger.error(
-            f"🔥 Критическая ошибка при парсинге канала '{channel_name}': {e}",
-            exc_info=True,
-        )
-        return 0
+        except Exception as e:
+            logger.error(
+                f"🔥 Критическая ошибка при парсинге канала '{channel_name}': {e}",
+                exc_info=True,
+            )
+            return 0
 
 
 async def parse_all_active_channels(

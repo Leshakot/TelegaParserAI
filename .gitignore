@@ -1,5 +1,6 @@
 .env
 .idea
+.csv
 venv/
 __pycache__
 data.db

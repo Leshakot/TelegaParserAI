@@ -2,7 +2,8 @@ from telethon import TelegramClient
 from config import TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_PHONE
 
 # Глобальная переменная для клиента
-telegram_client = TelegramClient('user_session', TELEGRAM_API_ID, TELEGRAM_API_HASH)
+telegram_client = TelegramClient("user_session", TELEGRAM_API_ID, TELEGRAM_API_HASH)
+
 
 async def init_telegram_client(bot_message=None):
     """
@@ -14,7 +15,7 @@ async def init_telegram_client(bot_message=None):
     if not await telegram_client.is_user_authorized():
         print("⚠️ Требуется авторизация...")
         # if bot_message:
-            # await bot_message.answer("📞 Введите ваш номер телефона:")
+        # await bot_message.answer("📞 Введите ваш номер телефона:")
 
         phone = TELEGRAM_PHONE
         await telegram_client.send_code_request(phone)
@@ -32,4 +33,14 @@ async def init_telegram_client(bot_message=None):
                 await bot_message.answer("❌ Не удалось войти. Проверьте код.")
             return False
 
+    return True
+
+
+async def ensure_telegram_client_connected():
+    print("ensure_telegram_client_connected")
+    if not await telegram_client.is_user_authorized():
+        print("try to start client")
+        await telegram_client.start()
+        if not telegram_client.is_user_authorized():
+            return False
     return True

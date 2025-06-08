@@ -62,16 +62,15 @@ async def get_unchecked_posts_count():
 async def export_data_to_csv():
     try:
         filename = f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        async with get_db_session() as session, open(
-            filename, mode="w", newline="", encoding="utf-8-sig"
-        ) as file:
-            writer = csv.writer(file, delimiter=";", quoting=csv.QUOTE_MINIMAL)
-
+        async with get_db_session() as session:
             headers = [col.name for col in Post.__table__.columns]
-            writer.writerow(headers)
 
             result = await session.execute(select(Post))
-            posts = result.all()
+            posts = result.scalars().all()
+        with open(filename, mode="w", newline="", encoding="utf-8-sig") as file:
+            writer = csv.writer(file, delimiter=";", quoting=csv.QUOTE_MINIMAL)
+
+            writer.writerow(headers)
 
             for post in posts:
                 row = [getattr(post, col.name) for col in Post.__table__.columns]
@@ -85,7 +84,7 @@ async def export_data_to_csv():
                 ]
                 writer.writerow(cleaned_row)
             logger.info(LOG_DB["export_csv"])
-            return filename
+        return filename
     except Exception as e:
         logging.error(LOG_DB["db_err"].format(error=e))
         return False

@@ -9,6 +9,8 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardRemove,
+    CallbackQuery,
+    FSInputFile,
 )
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -28,11 +30,15 @@ from database.db_commands import (
 )
 
 from core.clients import telegram_client  # <-- ваш клиент Telethon
-from core.parser import parse_all_active_channels
+from core.parser import parse_all_active_channels, parse_channel
 from core.ai_filter import check_post
 from core.states import ChannelStates, PostCheck
 
-from keyboards.keyboards import get_main_keyboard, get_stop_keyboard
+from keyboards.keyboards import (
+    get_main_keyboard,
+    get_stop_keyboard,
+    parse_channel_keyboard,
+)
 
 
 # Настройка логирования
@@ -66,21 +72,51 @@ async def add_channel_command(message: Message, state: FSMContext):
 async def process_channel_link(message: Message, state: FSMContext):
     try:
         channel_link = message.text.strip()
+        await state.update_data(channel_link=channel_link)
         success = await add_channel(channel_link, source="user")
         if success:
+            await state.set_state(ChannelStates.choosing_action)
             await message.answer(
                 f"✅ Канал {channel_link} добавлен для мониторинга!",
                 reply_markup=get_main_keyboard(),
+            )
+            await message.answer(
+                "Выберите действие:", reply_markup=parse_channel_keyboard
             )
         else:
             await message.answer(
                 "❌ Не удалось добавить канал. Проверьте формат ссылки.",
                 reply_markup=get_main_keyboard(),
             )
+            await state.clear()
     except Exception as e:
         await message.answer(f"❌ Ошибка: {str(e)}", reply_markup=get_main_keyboard())
-    finally:
         await state.clear()
+
+
+@router.callback_query(ChannelStates.choosing_action)
+async def process_channel_action(callback_query: CallbackQuery, state: FSMContext):
+    field = callback_query.data.strip()
+    print("field")
+    match field:
+        case "inplace_parse_channel":
+            data = await state.get_data()
+            channel_link = data.get("channel_link")
+            print(channel_link)
+            total_saved = await parse_channel(telegram_client, channel_link, limit=10)
+            await callback_query.message.answer(
+                f"✅ Парсинг завершён. Сохранено постов: {total_saved}"
+            )
+            await callback_query.answer()
+        case "back_to_menu":
+            await callback_query.message.answer(
+                f"Выберите действие:", reply_markup=get_main_keyboard()
+            )
+        case _:
+            await callback_query.message.answer(
+                "Нет такого действия.", reply_markup=get_main_keyboard()
+            )
+    await state.clear()
 
 
 @router.message(F.text == "👀 Парсинг постов")
@@ -193,8 +229,9 @@ async def export_data(message: Message):
     print(count)
     if count > 0:
         file_path = await export_data_to_csv()
-        with open(file_path, "rb") as file:
-            await message.answer_document(file, caption="📁 Ваши данные")
+        await message.answer_document(FSInputFile(file_path), caption="📁 Ваши данные")
+        # with open(file_path, "rb") as file:
+        #     await message.answer_document(file, caption="📁 Ваши данные")
     else:
         await message.answer("📁 Нет данных для выгрузки")
 
