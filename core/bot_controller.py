@@ -14,7 +14,6 @@ from aiogram.types import (
 )
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 
 from database.db_commands import (
     get_unchecked_posts_count,
@@ -29,7 +28,6 @@ from database.db_commands import (
     get_blacklist_pat_reason,
 )
 
-from core.clients import telegram_client  # <-- ваш клиент Telethon
 from core.parser import parse_all_active_channels, parse_channel
 from core.ai_filter import check_post
 from core.states import ChannelStates, PostCheck
@@ -39,19 +37,16 @@ from keyboards.keyboards import (
     get_stop_keyboard,
     parse_channel_keyboard,
 )
-
-
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-
-router = Router()
+from utils.logger import setup_logger
 
 
 # Глобальные переменные для управления процессом проверки
 CURRENT_CHECK_TASK = None
 STOP_CHECKING_FLAG = False
+
+logger = setup_logger()
+
+router = Router()
 
 
 @router.message(Command("start"))
@@ -103,7 +98,7 @@ async def process_channel_action(callback_query: CallbackQuery, state: FSMContex
             data = await state.get_data()
             channel_link = data.get("channel_link")
             print(channel_link)
-            total_saved = await parse_channel(telegram_client, channel_link, limit=10)
+            total_saved = await parse_channel(channel_link, limit=10)
             await callback_query.message.answer(
                 f"✅ Парсинг завершён. Сохранено постов: {total_saved}"
             )
@@ -123,23 +118,9 @@ async def process_channel_action(callback_query: CallbackQuery, state: FSMContex
 async def parse_posts_handler(message: Message):
     await message.answer("🔍 Подключаюсь к Telegram для парсинга...")
 
-    # if not telegram_client.is_connected():
-    #     try:
-    #         await telegram_client.connect()
-    #         if not await telegram_client.is_user_authorized():
-    #             await message.answer("❌ Telethon клиент не авторизован.")
-    #             logger.error("❌ Telethon клиент не авторизован.")
-    #             return
-    #     except Exception as e:
-    #         logger.critical(f"🔴 Ошибка подключения Telethon клиента: {e}")
-    #         await message.answer("⚠️ Не удалось подключиться к Telegram API.")
-    #         return
-
     try:
         print("Begin save posts")
-        total_saved = await parse_all_active_channels(
-            client=telegram_client, limit_per_channel=10
-        )
+        total_saved = await parse_all_active_channels(limit_per_channel=10)
         if total_saved > 0:
             await message.answer(
                 f"✅ Парсинг завершён. Сохранено постов: {total_saved}"
@@ -149,15 +130,6 @@ async def parse_posts_handler(message: Message):
     except Exception as e:
         logger.exception("Ошибка при выполнении парсинга")
         await message.answer("❗ Произошла ошибка при парсинге каналов.")
-
-
-@router.message(Command("parse"))
-async def parse_with_limit(message: Message):
-    try:
-        limit = int(message.text.split()[1])
-        await parse_all_active_channels(limit)
-    except:
-        await parse_all_active_channels()
 
 
 @router.message(F.text == "🔄 Проверить посты на м. схемы")
@@ -182,14 +154,14 @@ async def process_unchecked_posts(message: Message, total_count: int):
     batch_size = 1
     try:
         while not STOP_CHECKING_FLAG:
-            posts = await get_unchecked_posts(limit=batch_size)  # while db is sync
+            posts = await get_unchecked_posts(limit=batch_size)
             if not posts:
                 break
             for post_id, post_text in posts:
                 if STOP_CHECKING_FLAG:
                     break
                 is_recipe = await check_post(post_text)
-                await mark_post_as_checked(post_id, is_recipe)  # while db is sync
+                await mark_post_as_checked(post_id, is_recipe)
                 checked_count += 1
                 await message.answer(
                     f"🔍 Проверено {checked_count}/{total_count} постов...",
@@ -225,13 +197,11 @@ async def stop_checking(message: Message, state: FSMContext):
 
 @router.message(F.text == "📤 Выгрузить данные")
 async def export_data(message: Message):
-    count = await get_unchecked_posts_count()  # while db sync
+    count = await get_unchecked_posts_count()
     print(count)
     if count > 0:
         file_path = await export_data_to_csv()
         await message.answer_document(FSInputFile(file_path), caption="📁 Ваши данные")
-        # with open(file_path, "rb") as file:
-        #     await message.answer_document(file, caption="📁 Ваши данные")
     else:
         await message.answer("📁 Нет данных для выгрузки")
 
@@ -244,7 +214,7 @@ async def handle_find_channels(message: Message):
         if not new_channels:
             await message.answer("🤷 Новых каналов не найдено")
             return
-        saved = await save_new_channels(new_channels)  # while db is sync
+        saved = await save_new_channels(new_channels)
         await message.answer(
             f"✅ Найдено {len(new_channels)} новых каналов\n"
             f"📥 Сохранено: {saved} каналов\n"
@@ -256,7 +226,7 @@ async def handle_find_channels(message: Message):
 
 @router.message(F.text == "📊 Статистика")
 async def show_stats(message: Message):
-    stats = await get_stats()  # while db is sync
+    stats = await get_stats()
     text = (
         f"📊 Статистика:\n"
         f"• Всего постов: {stats['total_posts']}\n"
