@@ -117,9 +117,7 @@ async def process_channel_action(callback_query: CallbackQuery, state: FSMContex
 @router.message(F.text == "👀 Парсинг постов")
 async def parse_posts_handler(message: Message):
     await message.answer("🔍 Подключаюсь к Telegram для парсинга...")
-
     try:
-        print("Begin save posts")
         total_saved = await parse_all_active_channels(limit_per_channel=10)
         if total_saved > 0:
             await message.answer(
@@ -134,7 +132,7 @@ async def parse_posts_handler(message: Message):
 
 @router.message(F.text == "🔄 Проверить посты на м. схемы")
 async def check_new_posts(message: Message, state: FSMContext):
-    count = await get_unchecked_posts_count()  # while db sync
+    count = await get_unchecked_posts_count()
     if count == 0:
         await message.answer("🤷 Нет новых постов для проверки")
         return

@@ -5,6 +5,7 @@ venv/
 __pycache__
 data.db
 session_name.session
+*.session
 
 log.py
 test.py
