@@ -49,14 +49,11 @@ async def get_unchecked_posts_count():
             result = await session.execute(
                 select(func.count()).select_from(Post).where(Post.is_processed == False)
             )
-            # result = await session.execute(
-            #     select(Post).where(Post.is_processed == False)
-            # )
             count = result.scalar()
             return count or 0
         except SQLAlchemyError as e:
             logging.error(e)
-            return False
+            return 0  # Return 0 instead of False for consistency
 
 
 async def export_data_to_csv():
@@ -124,7 +121,14 @@ async def save_post(
 
 
 async def add_channel(channel_link, source="parser"):
-    channel_link = channel_link.split("/")[-1]
+    # Normalize channel link
+    if "@" in channel_link:
+        channel_link = channel_link.strip()
+    elif "t.me/" in channel_link:
+        channel_link = "@" + channel_link.split("t.me/")[-1].strip()
+    else:
+        channel_link = "@" + channel_link.split("/")[-1].strip()
+    
     async with get_db_session() as session:
         try:
             result = await session.execute(
@@ -151,19 +155,17 @@ async def is_blacklisted(value: str, check_pattern: bool = False):
         try:
             if check_pattern:
                 result = await session.execute(select(Blacklist.pattern))
-                patterns_db = result.scalars().all()
-                patterns = [pattern.pattern for pattern in patterns_db]
+                patterns = result.scalars().all()
                 for pattern in patterns:
                     if re.search(pattern, value):
                         return True
-
                 return False
             else:
                 result = await session.execute(
                     select(Blacklist).where(Blacklist.pattern == value)
                 )
-                patterns_db = result.scalar_one_or_none()
-                return patterns_db is not None
+                pattern_db = result.scalar_one_or_none()
+                return pattern_db is not None
         except SQLAlchemyError as e:
             logger.error(LOG_DB["db_err"].format(error=e))
             return False
@@ -186,13 +188,16 @@ async def save_new_channels(channels: List[str], source: str = "auto_find") -> i
     saved_count = 0
     async with get_db_session() as session:
         try:
+            # Fix the syntax error in the where clause
             existing = await session.execute(
-                select(Channel.channel_link).where(Channel.channel_link in channels)
+                select(Channel.channel_link).where(Channel.channel_link.in_(channels))
             )
             existing_links = set(existing.scalars().all())
+            
             for channel in channels:
-                if not channel in existing_links:
-                    link = f"https://t.me/ {channel[1:]}"
+                if channel not in existing_links:
+                    # Fix the URL formatting (remove space after t.me/)
+                    link = channel if channel.startswith('@') else f"@{channel}"
                     new_channel = Channel(
                         channel_link=link, added_date=datetime.now(), source=source
                     )
@@ -203,17 +208,15 @@ async def save_new_channels(channels: List[str], source: str = "auto_find") -> i
             return saved_count
         except SQLAlchemyError as e:
             logger.error(LOG_DB["db_err"].format(error=e))
-            return False
+            return 0  # Return 0 instead of False for consistency
 
 
 async def mark_post_as_checked(post_id, is_recipe):
     async with get_db_session() as session:
         try:
-            await session.execute(
-                update(Post)
-                .where(Post.id == post_id)
-                .values(is_processed=True, is_recipe=is_recipe)
-            )
+            stmt = update(Post).where(Post.id == post_id).values(is_processed=True, is_recipe=is_recipe)
+            await session.execute(stmt)
+            await session.commit()
             return True
         except SQLAlchemyError as e:
             logger.error(LOG_DB["db_err"].format(error=e))
@@ -231,7 +234,7 @@ async def get_unchecked_posts(limit=None):
             return posts
         except SQLAlchemyError as e:
             logger.error(LOG_DB["db_err"].format(error=e))
-            return False
+            return []  # Return empty list instead of False for consistency
 
 
 async def get_active_channels():
@@ -250,11 +253,9 @@ async def get_active_channels():
 async def deactivate_channel(channel_link: str, error_message: str = ""):
     async with get_db_session() as session:
         try:
-            await session.execute(
-                update(Channel)
-                .where(Channel.channel_link == channel_link)
-                .values(is_active=False)
-            )
+            stmt = update(Channel).where(Channel.channel_link == channel_link).values(is_active=False)
+            await session.execute(stmt)
+            
             history = ChannelHistory(
                 channel_link=channel_link,
                 status="inactive",
@@ -273,17 +274,17 @@ async def get_stats():
     async with get_db_session() as session:
         try:
             result = await session.execute(select(func.count()).select_from(Post))
-            all_posts = result.scalar()
+            all_posts = result.scalar() or 0
 
             result = await session.execute(
                 select(func.count()).select_from(Post).where(Post.is_recipe == True)
             )
-            recipe_posts = result.scalar()
+            recipe_posts = result.scalar() or 0
 
             result = await session.execute(
                 select(func.count()).select_from(Post).where(Post.is_processed == False)
             )
-            unck_posts = result.scalar()
+            unck_posts = result.scalar() or 0
 
             final_dict = {
                 "total_posts": all_posts,
@@ -293,7 +294,7 @@ async def get_stats():
             return final_dict
         except SQLAlchemyError as e:
             logger.error(LOG_DB["db_err"].format(error=e))
-            return False
+            return {"total_posts": 0, "recipes": 0, "unchecked": 0}  # Return default dict instead of False
 
 
 async def get_posts_for_search():
@@ -302,7 +303,7 @@ async def get_posts_for_search():
             result = await session.execute(
                 select(Post.post_text).where(Post.is_processed == False)
             )
-            posts = result.scalars().all()
+            posts = result.all()  # Use .all() instead of .scalars().all() to match expected return format
             return posts
         except SQLAlchemyError as e:
             logger.error(LOG_DB["db_err"].format(error=e))
@@ -345,13 +346,16 @@ async def insert_repl_chan_history(channel_link: str):
             )
             channel = result.scalar_one_or_none()
             if not channel:
-                new_channel = ChannelHistory(channel_link=channel_link)
+                new_channel = ChannelHistory(channel_link=channel_link, status="active")
                 session.add(new_channel)
                 await session.commit()
                 await session.refresh(new_channel)
                 return True
             else:
-                channel.status = "active"
+                stmt = update(ChannelHistory).where(
+                    ChannelHistory.channel_link == channel_link
+                ).values(status="active")
+                await session.execute(stmt)
                 await session.commit()
                 return True
 
