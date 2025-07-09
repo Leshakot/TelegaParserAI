@@ -11,9 +11,9 @@ from database.db_commands import (
 from utils.logger import setup_logger
 from constants.logger import LOG_DB
 from constants.db_constants import DEFAULT_PATTERNS
-
-
-logger = setup_logger()
+from telethon.errors import FloodWaitError
+from datetime import timedelta
+logger = setup_logger(  )
 
 
 async def initialize_blacklist():
@@ -32,43 +32,140 @@ async def initialize_blacklist():
             logger.error(LOG_DB["patter_error"].format(pattern=pattern, e=e))
 
 
-async def parse_channel(channel_name, limit=10):
+async def parse_channel(channel_name, months=None, all_time=False, limit=10):
+    """
+    Parse channel posts with different time periods
+    
+    Args:
+        channel_name (str): Channel name or link
+        months (int): Number of months to parse (None by default)
+        all_time (bool): Parse all posts if True (False by default)
+        limit (int): Limit of posts to parse if months and all_time are False
+    """
     channel = channel_name.split("/")[-1] if "/" in channel_name else channel_name
-    chat = await telegram_client.get_chat(channel)
-    logger.info(f"get chat {chat.title}, id - {chat.id}")
-    saved_count = 0
+    
     try:
-        async for message in telegram_client.get_chat_history(chat.id, limit=limit):
-            saved = await save_post(
-                check_date=datetime.now(),
-                post_date=message.date,
-                channel_link=f"https://t.me/{channel_name}",
-                post_link=message.link,
-                post_text=message.text,
-                user_requested=0,
-            )
-            if saved:
-                logger.info(
-                    LOG_DB["save_post"].format(link=message.link, date=message.date)
+        chat = await telegram_client.get_chat(channel)
+        logger.info(f"get chat {chat.title}, id - {chat.id}")
+        saved_count = 0
+        
+        if all_time:
+            # Parse all posts with delay
+            async for message in telegram_client.get_chat_history(chat.id):
+                await asyncio.sleep(0.5)  # Delay between requests
+                saved = await save_post(
+                    check_date=datetime.now(),
+                    post_date=message.date,
+                    channel_link=f"https://t.me/{channel_name}",
+                    post_link=message.link,
+                    post_text=message.text,
+                    user_requested=0,
                 )
-                saved_count += 1
+                if saved:
+                    logger.info(
+                        LOG_DB["save_post"].format(link=message.link, date=message.date)
+                    )
+                    saved_count += 1
+                    
+        elif months:
+            # Parse posts for last N months
+            date_from = datetime.now() - timedelta(days=30*months)
+            async for message in telegram_client.get_chat_history(chat.id):
+                if message.date < date_from:
+                    break
+                    
+                saved = await save_post(
+                    check_date=datetime.now(),
+                    post_date=message.date,
+                    channel_link=f"https://t.me/{channel_name}",
+                    post_link=message.link,
+                    post_text=message.text,
+                    user_requested=0,
+                )
+                if saved:
+                    logger.info(
+                        LOG_DB["save_post"].format(link=message.link, date=message.date)
+                    )
+                    saved_count += 1
+                    
+        else:
+            # Parse limited number of posts
+            async for message in telegram_client.get_chat_history(chat.id, limit=limit):
+                saved = await save_post(
+                    check_date=datetime.now(),
+                    post_date=message.date,
+                    channel_link=f"https://t.me/{channel_name}",
+                    post_link=message.link,
+                    post_text=message.text,
+                    user_requested=0,
+                )
+                if saved:
+                    logger.info(
+                        LOG_DB["save_post"].format(link=message.link, date=message.date)
+                    )
+                    saved_count += 1
+                    
         return saved_count
+
+    except FloodWaitError as e:
+        logger.error(f"FloodWaitError: waiting for {e.seconds} seconds")
+        await asyncio.sleep(e.seconds)
+        return await parse_channel(channel_name, months, all_time, limit)
+        
     except Exception as e:
         logger.error(LOG_DB["parse_error"].format(e=e))
         return 0
 
-
-async def parse_all_active_channels(limit_per_channel=10):
+async def parse_all_active_channels(months=None, all_time=False, limit_per_channel=10):
+    """
+    Parse all active channels with specified parameters
+    
+    Args:
+        months (int): Number of months to parse (None by default)
+        all_time (bool): Parse all posts if True (False by default)
+        limit_per_channel (int): Limit of posts per channel if months and all_time are False
+    """
     logger.info(LOG_DB["start_parse"])
     total_saved = 0
     channels = await get_active_channels()
+    
     for channel in channels:
         try:
             logger.info(LOG_DB["process"].format(channel=channel))
-            saved = await parse_channel(channel, limit=limit_per_channel)
+            
+            # Добавляем обработку различных режимов парсинга
+            if all_time:
+                logger.info(f"Parsing all posts from channel: {channel}")
+                saved = await parse_channel(channel, all_time=True)
+            elif months:
+                logger.info(f"Parsing last {months} months from channel: {channel}")
+                saved = await parse_channel(channel, months=months)
+            else:
+                logger.info(f"Parsing last {limit_per_channel} posts from channel: {channel}")
+                saved = await parse_channel(channel, limit=limit_per_channel)
+                
             total_saved += saved
-            await asyncio.sleep(2)
+            
+            # Добавляем адаптивную задержку между каналами
+            delay = 5 if all_time else 2  # Увеличенная задержка при парсинге всех постов
+            logger.info(f"Waiting {delay} seconds before next channel...")
+            await asyncio.sleep(delay)
+            
+        except FloodWaitError as e:
+            logger.error(f"FloodWaitError for channel {channel}: waiting {e.seconds} seconds")
+            await asyncio.sleep(e.seconds)
+            # Можно добавить повторную попытку парсинга этого канала
+            try:
+                saved = await parse_channel(channel, months=months, all_time=all_time, limit=limit_per_channel)
+                total_saved += saved
+            except Exception as retry_e:
+                logger.error(f"Retry failed for channel {channel}: {retry_e}")
+                continue
+                
         except Exception as e:
             logger.error(LOG_DB["parse_error"].format(e=e))
+            logger.error(f"Failed channel: {channel}, error: {str(e)}")
             continue
+            
+    logger.info(f"Total posts saved: {total_saved}")
     return total_saved
