@@ -56,7 +56,7 @@ async def get_unchecked_posts_count():
             return 0  # Return 0 instead of False for consistency
 
 
-async def export_data_to_csv():
+async def   export_data_to_csv():
     try:
         filename = f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         async with get_db_session() as session:
@@ -86,6 +86,46 @@ async def export_data_to_csv():
         logging.error(LOG_DB["db_err"].format(error=e))
         return False
 
+
+async def export_data_to_excel():
+    try:
+        from openpyxl import Workbook
+        from datetime import datetime
+        
+        filename = f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        
+        async with get_db_session() as session:
+            headers = [col.name for col in Post.__table__.columns]
+            
+            result = await session.execute(select(Post))
+            posts = result.scalars().all()
+        
+        # Создаем новую книгу Excel
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Posts"
+        
+        # Записываем заголовки
+        for col_idx, header in enumerate(headers, 1):
+            sheet.cell(row=1, column=col_idx).value = header
+        
+        # Записываем данные
+        for row_idx, post in enumerate(posts, 2):
+            for col_idx, col in enumerate(Post.__table__.columns, 1):
+                value = getattr(post, col.name)
+                # Преобразуем значение в строку, если это необходимо
+                if isinstance(value, str):
+                    value = value.strip()
+                sheet.cell(row=row_idx, column=col_idx).value = value
+        
+        # Сохраняем файл
+        workbook.save(filename)
+        logger.info(LOG_DB["export_csv"])
+        return filename
+    
+    except Exception as e:
+        logging.error(LOG_DB["db_err"].format(error=e))
+        return False
 
 async def save_post(
     check_date, post_date, channel_link, post_link, post_text, user_requested=0
