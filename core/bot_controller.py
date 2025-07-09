@@ -11,6 +11,8 @@ from aiogram.types import (
     ReplyKeyboardRemove,
     CallbackQuery,
     FSInputFile,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton
 )
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -32,11 +34,6 @@ from core.parser import parse_all_active_channels, parse_channel
 from core.ai_filter import check_post
 from core.states import ChannelStates, PostCheck
 
-from keyboards.keyboards import (
-    get_main_keyboard,
-    get_stop_keyboard,
-    parse_channel_keyboard,
-)
 from utils.logger import setup_logger
 
 
@@ -47,6 +44,32 @@ STOP_CHECKING_FLAG = False
 logger = setup_logger()
 
 router = Router()
+
+# Define keyboards properly
+def get_main_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="✅ Добавить канал для проверки"), KeyboardButton(text="👀 Парсинг постов")],
+            [KeyboardButton(text="🔄 Проверить посты на м. схемы"), KeyboardButton(text="📤 Выгрузить данные")],
+            [KeyboardButton(text="🔍 Найти новые каналы"), KeyboardButton(text="📊 Статистика")],
+            [KeyboardButton(text="/blacklist")]
+        ],
+        resize_keyboard=True
+    )
+
+def get_stop_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="🛑 Остановить проверку")]],
+        resize_keyboard=True
+    )
+
+# Define the parse_channel_keyboard as a variable
+parse_channel_keyboard = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="Парсить канал сейчас", callback_data="inplace_parse_channel")],
+        [InlineKeyboardButton(text="Назад в меню", callback_data="back_to_menu")]
+    ]
+)
 
 
 @router.message(Command("start"))
@@ -116,18 +139,118 @@ async def process_channel_action(callback_query: CallbackQuery, state: FSMContex
 
 @router.message(F.text == "👀 Парсинг постов")
 async def parse_posts_handler(message: Message):
-    await message.answer("🔍 Подключаюсь к Telegram для парсинга...")
+    """
+    Handler for parsing posts with different modes:
+    - Last N posts
+    - Last N months
+    - All posts
+    """
+    # Создаем клавиатуру для выбора режима парсинга
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text="📥 Последние 50 постов"),
+                KeyboardButton(text="📅 За период")
+            ],
+            [
+                KeyboardButton(text="📚 Все посты"),
+                KeyboardButton(text="❌ Отмена")
+            ]
+        ],
+        resize_keyboard=True
+    )
+    
+    await message.answer("Выберите режим парсинга:", reply_markup=keyboard)
+
+
+@router.message(F.text == "📥 Последние 50 постов")
+async def parse_latest_posts(message: Message):
+    await message.answer("🔍 Подключаюсь к Telegram для парсинга последних постов...")
     try:
-        total_saved = await parse_all_active_channels(limit_per_channel=10)
+        total_saved = await parse_all_active_channels(limit_per_channel=50)
         if total_saved > 0:
-            await message.answer(
-                f"✅ Парсинг завершён. Сохранено постов: {total_saved}"
-            )
+            await message.answer(f"✅ Парсинг завершён. Сохранено постов: {total_saved}", 
+                                reply_markup=get_main_keyboard())
         else:
-            await message.answer("ℹ️ Новых постов для сохранения не найдено.")
+            await message.answer("ℹ️ Новых постов для сохранения не найдено.", 
+                                reply_markup=get_main_keyboard())
     except Exception as e:
         logger.exception("Ошибка при выполнении парсинга")
-        await message.answer("❗ Произошла ошибка при парсинге каналов.")
+        await message.answer("❗ Произошла ошибка при парсинге каналов.", 
+                            reply_markup=get_main_keyboard())
+
+
+@router.message(F.text == "📅 За период")
+async def parse_by_period(message: Message):
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text="1 месяц"),
+                KeyboardButton(text="3 месяца"),
+                KeyboardButton(text="6 месяцев")
+            ],
+            [KeyboardButton(text="❌ Отмена")]
+        ],
+        resize_keyboard=True
+    )
+    await message.answer("Выберите период парсинга:", reply_markup=keyboard)
+
+
+@router.message(F.text.in_({"1 месяц", "3 месяца", "6 месяцев"}))
+async def parse_months(message: Message):
+    months_map = {"1 месяц": 1, "3 месяца": 3, "6 месяцев": 6}
+    months = months_map[message.text]
+    
+    await message.answer(f"🔍 Начинаю парсинг за последние {months} месяца(ев)...")
+    try:
+        total_saved = await parse_all_active_channels(months=months)
+        if total_saved > 0:
+            await message.answer(f"✅ Парсинг завершён. Сохранено постов: {total_saved}", 
+                                reply_markup=get_main_keyboard())
+        else:
+            await message.answer("ℹ️ Новых постов для сохранения не найдено.", 
+                                reply_markup=get_main_keyboard())
+    except Exception as e:
+        logger.exception("Ошибка при выполнении парсинга")
+        await message.answer("❗ Произошла ошибка при парсинге каналов.", 
+                            reply_markup=get_main_keyboard())
+
+
+@router.message(F.text == "📚 Все посты")
+async def parse_all_posts(message: Message):
+    await message.answer("⚠️ Внимание! Парсинг всех постов может занять длительное время.")
+    confirmation_keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text="✅ Подтвердить"),
+                KeyboardButton(text="❌ Отмена")
+            ]
+        ],
+        resize_keyboard=True
+    )
+    await message.answer("Подтвердите начало полного парсинга:", reply_markup=confirmation_keyboard)
+
+
+@router.message(F.text == "✅ Подтвердить")
+async def confirm_full_parse(message: Message):
+    await message.answer("🔍 Начинаю полный парсинг всех каналов...")
+    try:
+        total_saved = await parse_all_active_channels(all_time=True)
+        if total_saved > 0:
+            await message.answer(f"✅ Полный парсинг завершён. Сохранено постов: {total_saved}", 
+                                reply_markup=get_main_keyboard())
+        else:
+            await message.answer("ℹ️ Новых постов для сохранения не найдено.", 
+                                reply_markup=get_main_keyboard())
+    except Exception as e:
+        logger.exception("Ошибка при выполнении парсинга")
+        await message.answer("❗ Произошла ошибка при парсинге каналов.", 
+                            reply_markup=get_main_keyboard())
+
+
+@router.message(F.text == "❌ Отмена")
+async def cancel_parsing(message: Message):
+    await message.answer("🚫 Парсинг отменен", reply_markup=get_main_keyboard())
 
 
 @router.message(F.text == "🔄 Проверить посты на м. схемы")
@@ -279,6 +402,11 @@ async def show_blacklist(message: Message):
         f"• {item[0]} ({item[1] or 'без указания причины'})" for item in items
     )
     await message.answer(text[:4000])
+
+
+@router.message(F.text == "🔙 Назад")
+async def back_to_main_menu(message: Message):
+    await message.answer("Возвращаюсь в главное меню", reply_markup=get_main_keyboard())
 
 
 def setup_bot_handlers(dp: Dispatcher):
