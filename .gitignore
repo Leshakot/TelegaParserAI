@@ -6,6 +6,10 @@ __pycache__
 data.db
 session_name.session
 *.session
+*.session-journal
 
 log.py
 test.py
+
+*.log
+*.pid
