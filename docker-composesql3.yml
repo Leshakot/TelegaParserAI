@@ -1,0 +1,11 @@
+version: '3.9'
+
+services:
+  bot:
+    build: .
+    container_name: telegram_bot
+    env_file: .env
+    volumes:
+      - .:/app
+      - ./data:/app/data       
+    restart: unless-stopped

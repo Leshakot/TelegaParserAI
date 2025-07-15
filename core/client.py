@@ -3,7 +3,7 @@ from config import TELEGRAM_API_ID, TELEGRAM_API_HASH
 
 
 telegram_client = Client(
-    "user_session",
+    "data/user_session",
     TELEGRAM_API_ID,
     TELEGRAM_API_HASH,
 )

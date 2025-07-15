@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:16
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: mydb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - backend
+    ports:
+      - "5433:5432"
+    restart: unless-stopped
+
+  bot:
+    build: .
+    container_name: telegram_bot
+    depends_on:
+      - db
+    env_file: .env
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        python main.py
+      "
+    volumes:
+      - .:/app
+      - ./data:/app/data
+    networks:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+
+networks:
+  backend:
+
