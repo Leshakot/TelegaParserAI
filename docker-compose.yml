@@ -31,6 +31,9 @@ services:
     networks:
       - backend
     restart: unless-stopped
+    # ОТКЛЮЧАЕМ ЛОГИ
+    # logging:
+    #   driver: "none"
 
 volumes:
   pgdata:

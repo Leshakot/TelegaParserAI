@@ -58,7 +58,7 @@ async def parse_channel(channel_name, months=None, all_time=False, limit=10):
                     post_date=message.date,
                     channel_link=f"https://t.me/{channel_name}",
                     post_link=message.link,
-                    post_text=message.text,
+                    post_text=message.text or message.caption,
                     user_requested=0,
                 )
                 if saved:
@@ -79,7 +79,7 @@ async def parse_channel(channel_name, months=None, all_time=False, limit=10):
                     post_date=message.date,
                     channel_link=f"https://t.me/{channel_name}",
                     post_link=message.link,
-                    post_text=message.text,
+                    post_text=message.text or message.caption,
                     user_requested=0,
                 )
                 if saved:
@@ -96,7 +96,7 @@ async def parse_channel(channel_name, months=None, all_time=False, limit=10):
                     post_date=message.date,
                     channel_link=f"https://t.me/{channel_name}",
                     post_link=message.link,
-                    post_text=message.text,
+                    post_text=message.text or message.caption,
                     user_requested=0,
                 )
                 if saved:
