@@ -19,7 +19,12 @@ GIGACHAT_API_KEY = os.getenv("GIGACHAT_API_KEY")
 token_cache = {"access_token": None, "expires_at": 0}
 
 # Путь к SSL-сертификату
-cert_path = str(Path("russian_trusted_root_ca.cer").absolute())
+cert_path = 'russian_trusted_root_ca.cer'
+
+
+def create_ssl_contex():
+    ssl_context = ssl.create_default_context(cafile=cert_path)
+    return ssl_context
 
 
 def generate_rquid():
@@ -34,7 +39,7 @@ async def get_gigachat_token():
         return token_cache["access_token"]
 
     # Создаем SSL контекст с нашим сертификатом
-    ssl_context = ssl.create_default_context(cafile=cert_path)
+    ssl_context = create_ssl_contex()
 
     url = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
     headers = {
@@ -50,7 +55,7 @@ async def get_gigachat_token():
                 url,
                 headers=headers,
                 data={"scope": "GIGACHAT_API_PERS"},
-                ssl=ssl_context,  # Передаем SSL контекст
+                ssl=False,  # Передаем SSL контекст
             ) as response:
                 if response.status == 200:
                     token_data = await response.json()
@@ -79,7 +84,7 @@ async def analyze_post_with_gigachat(post_text: str) -> str:
         return "Ошибка: не удалось получить токен"
 
     # Создаем SSL контекст для основного запроса
-    ssl_context = ssl.create_default_context(cafile=cert_path)
+    ssl_context = create_ssl_contex()
 
     url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
     payload = {
@@ -119,7 +124,7 @@ async def analyze_post_with_gigachat(post_text: str) -> str:
                     "Authorization": f"Bearer {token}",
                     "Content-Type": "application/json",
                 },
-                ssl=ssl_context,
+                ssl=False,
                 timeout=aiohttp.ClientTimeout(total=30),
             ) as response:
                 if response.status == 200:
