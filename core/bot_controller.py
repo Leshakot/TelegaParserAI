@@ -1,6 +1,7 @@
-﻿import re
+import re
 import logging
 import asyncio
+import sys
 from typing import List
 
 from aiogram import Dispatcher, Router, F
@@ -12,7 +13,7 @@ from aiogram.types import (
     CallbackQuery,
     FSInputFile,
     InlineKeyboardMarkup,
-    InlineKeyboardButton
+    InlineKeyboardButton,
 )
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -28,11 +29,12 @@ from database.db_commands import (
     get_posts_for_search,
     get_channel_links,
     get_blacklist_pat_reason,
+    add_to_blacklist
 )
 
 from core.parser import parse_all_active_channels, parse_channel
 from core.ai_filter import check_post
-from core.states import ChannelStates, PostCheck
+from core.states import ChannelStates, PostCheck, BlockAdd
 
 # Настройка логирования
 # Создаем логгер
@@ -45,20 +47,18 @@ debug_handler.setLevel(logging.DEBUG)
 debug_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 debug_handler.setFormatter(debug_formatter)
 
-# Создаем фильтр, который пропускает только DEBUG и INFO сообщения
-class DebugInfoFilter(logging.Filter):
-    def filter(self, record):
-        return record.levelno <= logging.INFO
+# Создаем обработчик для вывода ошибок в терминал
+console_handler = logging.StreamHandler(sys.stderr)
+console_handler.setLevel(logging.ERROR)  # Только ERROR и выше
+console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(console_formatter)
 
-debug_handler.addFilter(DebugInfoFilter())
+# Добавляем обработчики к логгеру
 logger.addHandler(debug_handler)
+logger.addHandler(console_handler)
 
-# Создаем обработчик для ошибок (WARNING, ERROR, CRITICAL)
-error_handler = logging.FileHandler('error.log')
-error_handler.setLevel(logging.WARNING)
-error_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-error_handler.setFormatter(error_formatter)
-logger.addHandler(error_handler)
+# Отключаем передачу логов родительским логгерам
+logger.propagate = False
 
 # Глобальные переменные для управления процессом проверки
 CURRENT_CHECK_TASK = None
@@ -77,6 +77,7 @@ def get_main_keyboard():
         ],
         resize_keyboard=True
     )
+#2485
 
 def get_stop_keyboard():
     return ReplyKeyboardMarkup(
@@ -92,6 +93,16 @@ parse_channel_keyboard = InlineKeyboardMarkup(
     ]
 )
 
+def get_blacklist_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📜 Показать черный список")],
+            [KeyboardButton(text="🚫 Добавить в черный список")],
+            [KeyboardButton(text="✅ Удалить из черного списка")],
+            [KeyboardButton(text="🔙 Назад")],
+        ],
+        resize_keyboard=True,
+    )
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):
@@ -147,8 +158,10 @@ async def process_channel_action(callback_query: CallbackQuery, state: FSMContex
         case "inplace_parse_channel":
             data = await state.get_data()
             channel_link = data.get("channel_link")
+            print(f"Начинаю парсинг канала: {channel_link}")
             logger.info(f"Начинаю парсинг канала: {channel_link}")
             total_saved = await parse_channel(channel_link, limit=10)
+            print(f"Парсинг канала {channel_link} завершен. Сохранено постов: {total_saved}")
             logger.info(f"Парсинг канала {channel_link} завершен. Сохранено постов: {total_saved}")
             await callback_query.message.answer(
                 f"✅ Парсинг завершён. Сохранено постов: {total_saved}"
@@ -200,6 +213,7 @@ async def parse_latest_posts(message: Message):
     await message.answer("🔍 Подключаюсь к Telegram для парсинга последних постов...")
     try:
         total_saved = await parse_all_active_channels(limit_per_channel=50)
+        print(f"Парсинг завершен. Сохранено постов: {total_saved}")
         logger.info(f"Парсинг завершен. Сохранено постов: {total_saved}")
         if total_saved > 0:
             await message.answer(f"✅ Парсинг завершён. Сохранено постов: {total_saved}", 
@@ -239,6 +253,7 @@ async def parse_months(message: Message):
     await message.answer(f"🔍 Начинаю парсинг за последние {months} месяца(ев)...")
     try:
         total_saved = await parse_all_active_channels(months=months)
+        print(f"Парсинг за {months} месяцев завершен. Сохранено постов: {total_saved}")
         logger.info(f"Парсинг за {months} месяцев завершен. Сохранено постов: {total_saved}")
         if total_saved > 0:
             await message.answer(f"✅ Парсинг завершён. Сохранено постов: {total_saved}", 
@@ -274,6 +289,7 @@ async def confirm_full_parse(message: Message):
     await message.answer("🔍 Начинаю полный парсинг всех каналов...")
     try:
         total_saved = await parse_all_active_channels(all_time=True)
+        print(f"Полный парсинг завершен. Сохранено постов: {total_saved}")
         logger.info(f"Полный парсинг завершен. Сохранено постов: {total_saved}")
         if total_saved > 0:
             await message.answer(f"✅ Полный парсинг завершён. Сохранено постов: {total_saved}", 
@@ -297,6 +313,7 @@ async def cancel_parsing(message: Message):
 async def check_new_posts(message: Message, state: FSMContext):
     logger.info(f"Пользователь {message.from_user.id} запустил проверку постов")
     count = await get_unchecked_posts_count()
+    print(f"Найдено {count} непроверенных постов")
     logger.info(f"Найдено {count} непроверенных постов")
     
     if count == 0:
@@ -329,6 +346,7 @@ async def process_unchecked_posts(message: Message, total_count: int):
                 is_recipe = await check_post(post_text)
                 await mark_post_as_checked(post_id, is_recipe)
                 checked_count += 1
+                print(f"Проверено {checked_count}/{total_count} постов. Осталось: {total_count-checked_count}")
                 logger.info(f"Проверено {checked_count}/{total_count} постов. Осталось: {total_count-checked_count}")
                 await message.answer(
                     f"🔍 Проверено {checked_count}/{total_count} постов...",
@@ -336,12 +354,14 @@ async def process_unchecked_posts(message: Message, total_count: int):
                 )
             await asyncio.sleep(1)
         if STOP_CHECKING_FLAG:
+            print(f"Проверка прервана. Проверено {checked_count}/{total_count} постов")
             logger.info(f"Проверка прервана. Проверено {checked_count}/{total_count} постов")
             await message.answer(
                 f"⏹ Проверка прервана. Проверено {checked_count}/{total_count} постов.",
                 reply_markup=get_main_keyboard(),
             )
         else:
+            print(f"Проверка завершена. Обработано {checked_count} постов")
             logger.info(f"Проверка завершена. Обработано {checked_count} постов")
             await message.answer(
                 f"✅ Проверка завершена! Обработано {checked_count} постов.",
@@ -354,6 +374,9 @@ async def process_unchecked_posts(message: Message, total_count: int):
         global CURRENT_CHECK_TASK
         CURRENT_CHECK_TASK = None
 
+# добавить просмотр постов
+# добавить произвольный интервал
+# добавить удаление в blacklist
 
 @router.message(F.text == "🛑 Остановить проверку")
 async def stop_checking(message: Message, state: FSMContext):
@@ -373,6 +396,7 @@ async def export_data(message: Message):
     logger.debug(f"Количество непроверенных постов: {count}")
     if count > 0:
         file_path = await export_data_to_excel()
+        print(f"Данные выгружены в файл: {file_path}")
         logger.info(f"Данные выгружены в файл: {file_path}")
         await message.answer_document(FSInputFile(file_path), caption="📁 Ваши данные")
     else:
@@ -389,8 +413,10 @@ async def handle_find_channels(message: Message):
             logger.info("Новых каналов не найдено")
             await message.answer("🤷 Новых каналов не найдено")
             return
+        print(f"Найдено {len(new_channels)} новых каналов")
         logger.info(f"Найдено {len(new_channels)} новых каналов")
         saved = await save_new_channels(new_channels)
+        print(f"Сохранено {saved} новых каналов")
         logger.info(f"Сохранено {saved} новых каналов")
         await message.answer(
             f"✅ Найдено {len(new_channels)} новых каналов\n"
@@ -410,7 +436,7 @@ async def show_stats(message: Message):
     text = (
         f"📊 Статистика:\n"
         f"• Всего постов: {stats['total_posts']}\n"
-        f"• Рецептов: {stats['recipes']}\n"
+        f"• Мошеннические схемы : {stats['recipes']}\n"
         f"• Непроверенных: {stats['unchecked']}"
     )
     await message.answer(text)
@@ -446,15 +472,7 @@ async def search_new_channels() -> List[str]:
 @router.message(Command("blacklist"))
 async def manage_blacklist(message: Message, state: FSMContext):
     logger.info(f"Пользователь {message.from_user.id} открыл управление черным списком")
-    markup = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📜 Показать черный список")],
-            [KeyboardButton(text="🚫 Добавить в черный список")],
-            [KeyboardButton(text="✅ Удалить из черного списка")],
-            [KeyboardButton(text="🔙 Назад")],
-        ],
-        resize_keyboard=True,
-    )
+    markup = get_blacklist_keyboard()
     await message.answer("Управление черным списком:", reply_markup=markup)
 
 
@@ -471,6 +489,56 @@ async def show_blacklist(message: Message):
         f"• {item[0]} ({item[1] or 'без указания причины'})" for item in items
     )
     await message.answer(text[:4000])
+
+@router.message(F.text == '🚫 Добавить в черный список')
+async def add_blacklist_command(message: Message, state: FSMContext):
+    logger.info(f'Пользователь {message.from_user.id} выбрал добавить тг канал в черный список')
+    await message.answer(
+        "Отправьте ссылку на канал (например: @channel_name или https://t.me/channel_name ):",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+
+    await state.set_state(BlockAdd.bane)
+
+@router.message(BlockAdd.bane)
+async def add_blacklist_link(message : Message, state: FSMContext):
+    try:
+        channel_link = message.text.strip()
+        logger.info(f"Пользователь {message.from_user.id} добавляет канал: {channel_link}")
+        state.update_data(channel_link=channel_link)
+
+        if "@" in channel_link:
+            channel_link = channel_link.strip()
+        elif "t.me/" in channel_link:
+            channel_link = "@" + channel_link.split("t.me/")[-1].strip()
+        else:
+            channel_link = "@" + channel_link.split("/")[-1].strip()
+
+
+        success = await add_to_blacklist(pattern=channel_link)
+        if success:
+            print(f"Канал {channel_link} успешно добавлен в черный список")
+            logger.info(f"Канал {channel_link} успешно добавлен в черный список")
+            await state.set_state(ChannelStates.choosing_action)
+            await message.answer(
+                f"✅ Канал {channel_link} добавлен в blacklist!",
+                reply_markup=get_main_keyboard(),
+            )
+            await message.answer(
+                "Выберите действие:", reply_markup=get_blacklist_keyboard()
+            )
+        else:
+            logger.warning(f"Не удалось добавить канал {channel_link}")
+            await message.answer(
+                "❌ Не удалось добавить канал. Проверьте формат ссылки.",
+                reply_markup=get_main_keyboard(),
+            )
+            await state.clear()
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении канала: {str(e)}")
+        await message.answer(f"❌ Ошибка: {str(e)}", reply_markup=get_main_keyboard())
+        await state.clear()
+
 
 
 @router.message(F.text == "🔙 Назад")
