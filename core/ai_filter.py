@@ -80,6 +80,7 @@ async def analyze_post_with_gigachat(post_text: str) -> str:
 
     # Создаем SSL контекст для основного запроса
     ssl_context = ssl.create_default_context(cafile=cert_path)
+    print(ssl_context.cert_store_stats())
 
     url = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
     payload = {
@@ -119,7 +120,7 @@ async def analyze_post_with_gigachat(post_text: str) -> str:
                     "Authorization": f"Bearer {token}",
                     "Content-Type": "application/json",
                 },
-                ssl=ssl_context,
+                ssl=False,
                 timeout=aiohttp.ClientTimeout(total=30),
             ) as response:
                 if response.status == 200:
