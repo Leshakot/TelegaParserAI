@@ -1,0 +1,29 @@
+[project]
+name = "telegaparserai"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aiogram>=3.21.0",
+    "aiosqlite>=0.21.0",
+    "alembic>=1.16.4",
+    "asyncio>=3.4.3",
+    "charset-normalizer>=3.4.2",
+    "colorama>=0.4.6",
+    "dotenv>=0.9.9",
+    "iniconfig>=2.1.0",
+    "mako>=1.3.10",
+    "markupsafe>=3.0.2",
+    "packaging>=25.0",
+    "pluggy>=1.6.0",
+    "pygments>=2.19.2",
+    "pyrogram>=2.0.106",
+    "pysocks>=1.7.1",
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.1.0",
+    "requests>=2.32.4",
+    "sqlalchemy>=2.0.41",
+    "telethon>=1.40.0",
+    "urllib3>=2.5.0",
+]
