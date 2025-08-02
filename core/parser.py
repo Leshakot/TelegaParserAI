@@ -17,7 +17,9 @@ logger = setup_logger(  )
 
 
 async def initialize_blacklist():
-    """Заполняет черный список базовыми шаблонами, если их ещё нет в БД."""
+    """
+    Initialize the blacklist with default patterns if they don't exist in DB
+    """
     for pattern, reason in DEFAULT_PATTERNS:
         try:
             exists = await is_blacklisted(pattern, check_pattern=True)
@@ -34,7 +36,7 @@ async def initialize_blacklist():
 
 async def parse_channel(channel_name, months=None, all_time=False, limit=10):
     """
-    Parse channel posts with different time periods
+    Parse channel posts with different time periods, including forwarded messages
     
     Args:
         channel_name (str): Channel name or link
@@ -49,23 +51,54 @@ async def parse_channel(channel_name, months=None, all_time=False, limit=10):
         logger.info(f"get chat {chat.title}, id - {chat.id}")
         saved_count = 0
         
+        async def process_message(message):
+            nonlocal saved_count
+            # Save original message
+            saved = await save_post(
+                check_date=datetime.now(),
+                post_date=message.date,
+                channel_link=f"https://t.me/{channel_name}",
+                post_link=message.link,
+                post_text=message.text,
+                user_requested=0,
+            )
+            if saved:
+                logger.info(
+                    LOG_DB["save_post"].format(link=message.link, date=message.date)
+                )
+                saved_count += 1
+
+            # Handle forwarded message
+            if message.forward_from_chat or message.forward_from:
+                forward_text = message.text
+                forward_link = message.link
+                forward_date = message.forward_date or message.date
+                
+                # Get forwarded channel info if available
+                forward_channel = None
+                if message.forward_from_chat:
+                    forward_channel = f"https://t.me/{message.forward_from_chat.username or message.forward_from_chat.id}"
+                
+                saved = await save_post(
+                    check_date=datetime.now(),
+                    post_date=forward_date,
+                    channel_link=forward_channel or f"https://t.me/{channel_name}",
+                    post_link=forward_link,
+                    post_text=forward_text,
+                    user_requested=0,
+                    is_forwarded=True  # Add flag to indicate forwarded message
+                )
+                if saved:
+                    logger.info(
+                        LOG_DB["save_post"].format(link=forward_link, date=forward_date)
+                    )
+                    saved_count += 1
+
         if all_time:
             # Parse all posts with delay
             async for message in telegram_client.get_chat_history(chat.id):
                 await asyncio.sleep(0.5)  # Delay between requests
-                saved = await save_post(
-                    check_date=datetime.now(),
-                    post_date=message.date,
-                    channel_link=f"https://t.me/{channel_name}",
-                    post_link=message.link,
-                    post_text=message.text or message.caption,
-                    user_requested=0,
-                )
-                if saved:
-                    logger.info(
-                        LOG_DB["save_post"].format(link=message.link, date=message.date)
-                    )
-                    saved_count += 1
+                await process_message(message)
                     
         elif months:
             # Parse posts for last N months
@@ -73,38 +106,11 @@ async def parse_channel(channel_name, months=None, all_time=False, limit=10):
             async for message in telegram_client.get_chat_history(chat.id):
                 if message.date < date_from:
                     break
-                    
-                saved = await save_post(
-                    check_date=datetime.now(),
-                    post_date=message.date,
-                    channel_link=f"https://t.me/{channel_name}",
-                    post_link=message.link,
-                    post_text=message.text or message.caption,
-                    user_requested=0,
-                )
-                if saved:
-                    logger.info(
-                        LOG_DB["save_post"].format(link=message.link, date=message.date)
-                    )
-                    saved_count += 1
-                    
+                await process_message(message)  
         else:
             # Parse limited number of posts
             async for message in telegram_client.get_chat_history(chat.id, limit=limit):
-                saved = await save_post(
-                    check_date=datetime.now(),
-                    post_date=message.date,
-                    channel_link=f"https://t.me/{channel_name}",
-                    post_link=message.link,
-                    post_text=message.text or message.caption,
-                    user_requested=0,
-                )
-                if saved:
-                    logger.info(
-                        LOG_DB["save_post"].format(link=message.link, date=message.date)
-                    )
-                    saved_count += 1
-                    
+                await process_message(message)   
         return saved_count
 
     except FloodWaitError as e:
@@ -115,7 +121,6 @@ async def parse_channel(channel_name, months=None, all_time=False, limit=10):
     except Exception as e:
         logger.error(LOG_DB["parse_error"].format(e=e))
         return 0
-
 async def parse_all_active_channels(months=None, all_time=False, limit_per_channel=10):
     """
     Parse all active channels with specified parameters

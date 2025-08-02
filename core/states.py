@@ -9,3 +9,7 @@ class ChannelStates(StatesGroup):
 class PostCheck(StatesGroup):
     checking = State()
     processing = State()
+
+
+class BlockAdd(StatesGroup):
+    bane = State()    
